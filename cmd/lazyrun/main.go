@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/integrii/flaggy"
@@ -41,7 +42,8 @@ func run() error {
 	parser.ShowCompletion = false
 	var check, state bool
 	var start, stop, restart, logs, runID string
-	var after uint64
+	var afterValues []string
+	var tailValues []int
 	parser.Bool(&check, "", "check", "Validate configuration only; do not launch the supervisor")
 	parser.Bool(&state, "", "state", "Connect/synchronize and print project state as JSON (default until TUI)")
 	parser.String(&start, "", "start", "Start a configured alias; commands survive client exit")
@@ -49,7 +51,8 @@ func run() error {
 	parser.String(&restart, "", "restart", "Gracefully restart/rerun an alias using this environment")
 	parser.String(&logs, "", "logs", "Read an alias's bounded output as JSON (data is base64)")
 	parser.String(&runID, "", "run-id", "Expected run ID for --logs; defaults to latest run")
-	parser.UInt64(&after, "", "after", "Log byte cursor for --logs")
+	parser.StringSlice(&afterValues, "", "after", "Log byte cursor for --logs (otherwise read the recent tail)")
+	parser.IntSlice(&tailValues, "", "tail", "Initial log lines; 0 means byte-bounded tail (defaults to logs.tail)")
 	if err := parser.ParseArgs(os.Args[1:]); err != nil {
 		return err
 	}
@@ -62,8 +65,27 @@ func run() error {
 	if actions > 1 {
 		return fmt.Errorf("choose only one of --check, --state, --start, --stop, --restart, --logs")
 	}
-	if logs == "" && (runID != "" || after != 0) {
-		return fmt.Errorf("--run-id and --after require --logs")
+	if len(afterValues) > 1 || len(tailValues) > 1 {
+		return fmt.Errorf("--after and --tail can only be supplied once")
+	}
+	afterProvided, tailProvided := len(afterValues) == 1, len(tailValues) == 1
+	if logs == "" && (runID != "" || afterProvided || tailProvided) {
+		return fmt.Errorf("--run-id, --after and --tail require --logs")
+	}
+	tail := -1
+	if tailProvided {
+		tail = tailValues[0]
+	}
+	if (tailProvided && tail < 0) || (tailProvided && afterProvided) {
+		return fmt.Errorf("--tail must be nonnegative and cannot be combined with --after")
+	}
+	var after uint64
+	if afterProvided {
+		var err error
+		after, err = strconv.ParseUint(afterValues[0], 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid --after cursor: %w", err)
+		}
 	}
 	dir, err := os.Getwd()
 	if err != nil {
@@ -88,12 +110,12 @@ func run() error {
 	case restart != "":
 		result, err = connection.Client.Restart(ctx, restart, os.Environ())
 	case logs != "":
+		var current model.State
+		current, err = connection.Client.State(ctx)
+		if err != nil {
+			return err
+		}
 		if runID == "" {
-			var current model.State
-			current, err = connection.Client.State(ctx)
-			if err != nil {
-				return err
-			}
 			for _, item := range current.Commands {
 				if item.Run.Definition.Alias == logs {
 					runID = item.Run.ID
@@ -101,7 +123,14 @@ func run() error {
 				}
 			}
 		}
-		result, err = connection.Client.Logs(ctx, logs, runID, after, 0)
+		if afterProvided {
+			result, err = connection.Client.Logs(ctx, logs, runID, after, 0)
+		} else {
+			if tail == -1 {
+				tail = current.Project.Logs.Tail
+			}
+			result, err = connection.Client.TailLogs(ctx, logs, runID, tail, 0)
+		}
 	default:
 		result, err = connection.Client.State(ctx)
 	}

@@ -84,16 +84,37 @@ create a second lock domain. Do not recursively remove arbitrary `/tmp` paths.
 
 ## Missing output or disk failures
 
-M3 output is a bounded memory tail, not disk logs. It survives dashboard/client
-reconnects while the same supervisor lives, but supervisor replacement reports
-historical output as `unavailable`. M4 will implement disk retention/rotation.
-Log reads are run-scoped byte cursors; `truncated` means the retained tail passed
-that cursor. Resume from the response's `next`; use the new run ID after rerun.
+Output is a bounded disk ring in the project's state directory under
+`logs/<sha256(alias)>/`. Only the latest run is retained. Initial CLI reads use
+`logs.tail` and a 64 KiB byte limit; try `--tail 0` for a byte-only tail, or
+`--after 0` to read from the oldest retained bytes. For incremental reads resume
+from the response's `next` with the same run ID. Use a new run ID after rerun.
+
+`truncated` means rotation or dropped output overtook the requested cursor, or
+there is a gap between returned records. Records retain their own byte cursors
+and capture times. Smaller retention windows are normal with rotation or the
+bounded record index; `maxBytes` is a ceiling, not a guaranteed history length.
+Finalized disk logs survive supervisor replacement. Logs from older memory-only
+versions or missing files are `unavailable`; never substitute another run's logs.
+After abrupt supervisor loss, the final queued/torn suffix may be missing.
 
 Noninteractive output can be buffered: try Python `-u`/`PYTHONUNBUFFERED=1`.
 stdin is `/dev/null`; prompts, PTYs, and interactive commands are unsupported.
 Raw output is base64 in the headless CLI so terminal control sequences aren't
 rendered. Do not decode untrusted output straight into a terminal.
+
+A log `error` or state `logError` means retention failed or the disk queue
+could not keep up. Commands still drain output; a successful exit is not proof
+all output was retained. Queue overflow evicts older pending output and continues
+writing. Setup/write failures stop retention for that run; fix disk space or
+unsafe permissions and explicitly rerun after inspecting state. Never delete or
+replace live ring files to try to repair capture. Read errors/checksum failures
+are visible, and unverified data is not returned during recovery. Logs themselves
+may contain secrets; don't share raw log files casually.
+
+Protocol version 2 is required for disk logs. An old live supervisor is not a
+stale socket: don't delete its locks/socket. After verifying/stopping its commands,
+identify and stop the old supervisor deliberately before using the new binary.
 
 A failed durable launch-intent write executes nothing. A metadata failure after
 launch/stop is reported as `metadataError`, but capture continues and the process

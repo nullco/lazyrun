@@ -130,6 +130,12 @@ func (c *Client) Restart(ctx context.Context, alias string, env []string) (model
 	err := c.call(ctx, Restart, startPayload(alias, env), &run)
 	return run, err
 }
+func (c *Client) TailLogs(ctx context.Context, alias, runID string, lines, limit int) (model.LogRead, error) {
+	var result model.LogRead
+	err := c.call(ctx, ReadLogs, ReadLogsPayload{Alias: alias, RunID: runID, Tail: &lines, Limit: limit}, &result)
+	return result, err
+}
+
 func (c *Client) Logs(ctx context.Context, alias, runID string, after uint64, limit int) (model.LogRead, error) {
 	var result model.LogRead
 	err := c.call(ctx, ReadLogs, ReadLogsPayload{Alias: alias, RunID: runID, After: after, Limit: limit}, &result)

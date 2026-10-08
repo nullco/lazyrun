@@ -1,16 +1,15 @@
 package runtime
 
 import (
-	"errors"
+	"lazyrun/internal/logstore"
 	"lazyrun/internal/model"
 )
 
-const MaxLogRead = 64 * 1024
+const MaxLogRead = logstore.MaxRead
 
-var ErrCursor = errors.New("invalid log cursor or read limit")
+var ErrCursor = logstore.ErrCursor
 
-// These byte cursors are the M3 memory-tail transport adapter. Capture-time
-// records and disk retention are M4 work; the run ID remains mandatory.
+// The memory adapter is used only in lifecycle fixtures; the CLI uses disk logs.
 func (b *memoryOutput) read(runID string, after uint64, limit int) (model.LogRead, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

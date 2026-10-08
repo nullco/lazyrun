@@ -139,6 +139,9 @@ type Run struct {
 	Outcome       *Outcome        `json:"outcome,omitempty"`
 	Error         string          `json:"error,omitempty"`
 	MetadataError string          `json:"metadataError,omitempty"`
+	LogError      string          `json:"logError,omitempty"`
+	LogMaxBytes   int64           `json:"logMaxBytes,omitempty"`
+	LogEnd        uint64          `json:"logEnd,omitempty"`
 }
 
 func (r Run) Clone() Run {

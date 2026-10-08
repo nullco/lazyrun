@@ -7,7 +7,7 @@ import (
 	"lazyrun/internal/model"
 )
 
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 type Operation string
 
@@ -86,4 +86,5 @@ type ReadLogsPayload struct {
 	RunID string `json:"runId"`
 	After uint64 `json:"after"`
 	Limit int    `json:"limit,omitempty"`
+	Tail  *int   `json:"tail,omitempty"` // nil: cursor read; zero: byte-bounded tail
 }

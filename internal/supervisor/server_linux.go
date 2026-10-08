@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	"lazyrun/internal/config"
+	"lazyrun/internal/logstore"
 	"lazyrun/internal/model"
 	"lazyrun/internal/runtime"
 	"lazyrun/internal/transport"
@@ -100,7 +101,7 @@ func RunInternal(ctx context.Context, root, binaryVersion string) (err error) {
 	if err != nil {
 		return err
 	}
-	manager, err := runtime.New(p, runtime.Options{Persist: func(r model.Run) error {
+	manager, err := runtime.New(p, runtime.Options{LogStore: logstore.New(paths.State), Persist: func(r model.Run) error {
 		err := storage.Save(r)
 		if err != nil {
 			logger.WithError(err).Error("run metadata could not be retained")
@@ -223,7 +224,16 @@ func (b *backend) handle(req transport.Request) transport.Response {
 		if err := transport.Decode(req.Payload, &payload); err != nil {
 			return invalid(req, err)
 		}
-		read, err := b.manager.ReadOutput(payload.Alias, payload.RunID, payload.After, payload.Limit)
+		var read model.LogRead
+		var err error
+		if payload.Tail != nil {
+			if payload.After != 0 {
+				return invalid(req, errors.New("tail and after are mutually exclusive"))
+			}
+			read, err = b.manager.TailOutput(payload.Alias, payload.RunID, *payload.Tail, payload.Limit)
+		} else {
+			read, err = b.manager.ReadOutput(payload.Alias, payload.RunID, payload.After, payload.Limit)
+		}
 		return transport.Reply(req, read, runtimeError(err))
 	default:
 		return invalid(req, errors.New("unsupported operation"))

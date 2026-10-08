@@ -4,7 +4,8 @@
 
 M1 provides the config/domain foundation; M2 proves the headless process-group
 engine; M3 adds detached supervision, reconnect, config synchronization, private
-IPC, and atomic metadata. Disk capture/rotation remains M4, the dashboard M5.
+IPC, and atomic metadata. M4 adds bounded disk capture/rotation; the dashboard
+remains M5.
 The headless CLI always goes through the same supervisor path the TUI will use;
 there is no in-process execution shortcut with weaker lifetime guarantees.
 
@@ -144,12 +145,52 @@ permission failures, and incomplete launch identity remain `unknown` and block
 start/stop/restart with manual-cleanup guidance. They are never signaled or reaped.
 Corrupt/incompatible metadata prevents unsafe startup rather than being discarded.
 
-## Temporary log adapter
+## M4 bounded disk logs
 
-M3 retains a bounded raw-byte memory tail per latest run and exposes byte cursors
-with run IDs, truncation flags, and at most 64 KiB per read. Reads/slow sockets do
-not own capture or command lifetimes. Historical memory output after supervisor
-replacement is explicitly marked unavailable. Responses encode raw output bytes
-as base64, preserving invalid UTF-8 without rendering terminal control sequences.
-M4 replaces this adapter with bounded disk capture, timestamp records, rotation,
-and disk-write stress/error tests. Full terminal sanitization remains an M5 gate.
+The CLI/supervisor now use `internal/logstore`; the M2 memory tail remains only
+for standalone runtime fixtures. Protocol version 2 adds timestamped records and
+explicit initial-tail requests. It deliberately rejects older supervisors instead
+of silently serving their memory-only retention as disk-backed logs. Byte cursors
+and mandatory run IDs remain stable concepts; lifecycle mutations are unchanged.
+
+Each alias has a private dirfd-backed `logs/<sha256(alias)>/` directory and four
+fixed files. Small budgets use one to three active slots. Rotation truncates the
+oldest slot before reuse, under a disk/index lock; no unbounded backup files or
+unlinked files held by slow readers accumulate. Payload never exceeds the run's
+`maxBytes`; physical file lengths exceed it by at most 336 bytes. Allocation-unit
+filesystem overhead is separate. Record-index limits may rotate early on tiny
+writes (at most 1,024 entries per slot), keeping memory bounded independently of
+arbitrary configured disk budgets. Removed aliases' latest logs/metadata remain
+on disk; there is no project-wide historical alias garbage collector in v1.
+
+Headers carry format version, run-ID hash, immutable retention budget, and first
+cursor. Records carry byte cursor, capture time, length, payload, and CRC32 over
+both record header and payload. Chunks are at most 32 KiB; timestamps describe
+capture chunks, not application emission times or exact per-line times. Both
+streams share a pipe, so no stronger cross-stream ordering is promised.
+
+Capture and disk IO have separate locks. An eight-chunk (256 KiB) queue evicts the
+oldest pending chunk on overflow, keeping recent/final bytes without waiting for
+disks or clients. Cursors still count discarded bytes, so subsequent retained
+records reveal gaps. Setup/write failures disable further writes for that run;
+pipe draining continues. Sticky `logError`/read `error` are visible even during an
+active run and persisted on state transitions. Client reads never retry writes or
+repair files. Final capture closes flush the queue, fsync files and directory,
+then runtime persists final outcome and captured byte count. Local filesystem IO
+can itself block; the queue isolates draining, not arbitrary filesystem hangs
+from finalization/startup. Normal capture is not timed out as an escaped pipe just
+because final disk sync takes longer than the pipe-drain timeout.
+
+Restore checks format, run identity, size/record/index bounds, cursor ordering,
+and checksums once to rebuild the bounded index. Torn/corrupt suffixes are not
+served; verified prefixes remain available with errors. Missing or memory-only
+logs are explicitly unavailable. A supervisor-loss run warns its final tail may
+be incomplete, without inventing an outcome or granting process ownership.
+
+Reads fetch at most 64 KiB of payload through the index; reconnect does not load
+whole files. Each response includes concatenated raw data plus timestamped slices
+with their original byte cursors, so mid-response gaps are unambiguous. Everything
+is base64 in JSON. Initial tail reads are byte-bounded before counting lines
+(default 1,000; zero means byte limit only). Scrolling/UI buffers and full terminal
+sanitization remain M5 responsibilities. Capture times are always retained;
+`logs.timestamps` only controls future display.

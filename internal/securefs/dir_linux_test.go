@@ -74,6 +74,58 @@ func TestRejectSymlinksPermissionsAndHardlinks(t *testing.T) {
 	}
 }
 
+func TestPrivateChildUsesCapabilityAfterRename(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(parent, "original")
+	d, err := Open(original, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	renamed := filepath.Join(parent, "renamed")
+	if err := os.Rename(original, renamed); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, original); err != nil {
+		t.Fatal(err)
+	}
+	child, err := d.Child("child", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer child.Close()
+	if err := child.AtomicWrite("value", []byte("safe")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(renamed, "child", "value")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "child")); !os.IsNotExist(err) {
+		t.Fatal("followed ancestor pathname", err)
+	}
+	for _, name := range []string{"../escape", "", ".", ".."} {
+		if _, err := d.Child(name, true); err == nil {
+			t.Fatal("accepted invalid child name")
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(renamed, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Child("link", true); err == nil {
+		t.Fatal("followed child symlink")
+	}
+	if err := os.Mkdir(filepath.Join(renamed, "public"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Child("public", false); err == nil {
+		t.Fatal("accepted nonprivate child")
+	}
+}
+
 func TestAtomicWriteAndDirectoryCapability(t *testing.T) {
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0700); err != nil {

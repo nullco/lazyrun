@@ -59,7 +59,7 @@ func (s *store) Load() ([]model.Run, error) {
 		if strings.HasPrefix(name, ".tmp-") {
 			continue
 		} // Never unlink arbitrary leftover files.
-		if name == "diagnostic.log" || name == "state.lock" {
+		if name == "diagnostic.log" || name == "state.lock" || name == "logs" {
 			continue
 		}
 		if !strings.HasSuffix(name, ".json") {

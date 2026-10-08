@@ -64,16 +64,13 @@ func (m *Manager) Sync(project model.Project) error {
 		s.configured = false
 	}
 	limit := project.Logs.MaxBytes
-	if limit > MaxMemoryOutput {
-		limit = MaxMemoryOutput
-	}
 	for _, d := range project.Definitions() {
 		s, ok := m.slots[d.Alias]
 		if !ok {
 			s = &slot{run: model.Run{ProjectID: m.projectID, Definition: d.Clone(), Shell: project.Shell, Lifecycle: model.NotStarted}}
 			m.slots[d.Alias] = s
 		}
-		s.definition, s.configured, s.shell, s.outputLimit = d, true, project.Shell, int(limit)
+		s.definition, s.configured, s.shell, s.outputLimit = d, true, project.Shell, limit
 		if s.run.ID == "" {
 			s.run.Definition, s.run.Shell = d.Clone(), project.Shell
 		}
@@ -94,7 +91,7 @@ func (m *Manager) State() model.State {
 		if removed && !s.run.Lifecycle.Active() {
 			return
 		}
-		item := model.CommandState{Run: s.run.Clone(), Removed: removed}
+		item := model.CommandState{Run: snapshotLocked(s), Removed: removed}
 		if s.configured {
 			d := s.definition.Clone()
 			item.Definition = &d
@@ -140,6 +137,15 @@ func (m *Manager) Restore(runs []model.Run) error {
 		s.cmd = nil
 		s.output = &memoryOutput{limit: MaxMemoryOutput}
 		s.outputUnavailable = true
+		if m.opts.LogStore != nil {
+			problem := r.LogError
+			if problem == "" && r.LogMaxBytes > 0 && r.Outcome == nil {
+				problem = "log tail may be incomplete after supervisor loss"
+			}
+			s.diskOutput = m.opts.LogStore.Restore(r.Definition.Alias, r.ID, r.LogMaxBytes, r.LogEnd, problem)
+			s.output = nil
+			s.outputUnavailable = false
+		}
 		s.done = make(chan struct{})
 		// There is no future collector/reaper for a historical run, even if unknown.
 		close(s.done)
@@ -151,6 +157,9 @@ func (m *Manager) Restore(runs []model.Run) error {
 }
 
 func (m *Manager) persistLocked(s *slot) error {
+	if s.diskOutput != nil {
+		s.run.LogError = s.diskOutput.Error()
+	}
 	if m.opts.Persist == nil {
 		return nil
 	}

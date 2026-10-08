@@ -76,7 +76,41 @@ func Open(path string, create bool) (*Dir, error) {
 	return &Dir{file: os.NewFile(uintptr(fd), path), Path: path}, nil
 }
 
+// Child opens a private subdirectory through this capability, never through
+// an ancestor pathname that could have been renamed or redirected.
+func (d *Dir) Child(name string, create bool) (*Dir, error) {
+	if !validName(name) {
+		return nil, errors.New("invalid private directory name")
+	}
+	fd, err := unix.Openat(d.FD(), name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ENOENT) && create {
+		if err := unix.Mkdirat(d.FD(), name, 0700); err != nil {
+			if !errors.Is(err, unix.EEXIST) {
+				return nil, err
+			}
+		} else if err := d.Sync(); err != nil {
+			return nil, err
+		}
+		fd, err = unix.Openat(d.FD(), name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
+	if stat.Uid != uint32(os.Geteuid()) || stat.Mode&0777 != 0700 {
+		unix.Close(fd)
+		return nil, errors.New("private child directory must have expected owner and mode 0700")
+	}
+	path := filepath.Join(d.Path, name)
+	return &Dir{file: os.NewFile(uintptr(fd), path), Path: path}, nil
+}
+
 func (d *Dir) Close() error { return d.file.Close() }
+func (d *Dir) Sync() error  { return d.file.Sync() }
 func (d *Dir) FD() int      { return int(d.file.Fd()) }
 
 // ProcPath makes Linux socket paths short, and resolves through an already

@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"lazyrun/internal/logstore"
 	"lazyrun/internal/model"
 )
 
@@ -43,6 +44,7 @@ type Options struct {
 	RestartTimeout time.Duration
 	DrainTimeout   time.Duration
 	Persist        func(model.Run) error // Called before launch intent and on state transitions.
+	LogStore       *logstore.Store       // nil only for in-process lifecycle fixtures
 }
 
 type Manager struct {
@@ -59,10 +61,11 @@ type slot struct {
 	definition        model.Definition
 	configured        bool
 	shell             string
-	outputLimit       int
+	outputLimit       int64
 	run               model.Run
 	cmd               *exec.Cmd
 	output            *memoryOutput
+	diskOutput        *logstore.Output
 	outputUnavailable bool
 	done              chan struct{}
 	pending           bool
@@ -118,7 +121,15 @@ func (m *Manager) Snapshot(alias string) (model.Run, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.run.Clone(), nil
+	return snapshotLocked(s), nil
+}
+
+func snapshotLocked(s *slot) model.Run {
+	r := s.run.Clone()
+	if s.diskOutput != nil {
+		r.LogError = s.diskOutput.Error()
+	}
+	return r
 }
 
 // Start uses only the requesting client's environment snapshot, then applies
@@ -155,8 +166,15 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 		return s.run.Clone(), fmt.Errorf("create run ID: %w", err)
 	}
 	s.run = model.Run{ID: hex.EncodeToString(bytes[:]), ProjectID: m.projectID, Definition: s.definition.Clone(), Shell: s.shell, Lifecycle: model.Starting, StartedAt: time.Now(), Identity: model.ProcessIdentity{BootID: m.bootID}}
-	s.output = &memoryOutput{limit: s.outputLimit}
+	if s.diskOutput != nil {
+		s.diskOutput.Release()
+		s.diskOutput = nil
+	}
+	s.output = &memoryOutput{limit: int(min(s.outputLimit, int64(MaxMemoryOutput)))}
 	s.outputUnavailable = false
+	if m.opts.LogStore != nil {
+		s.run.LogMaxBytes = s.outputLimit
+	}
 	s.cmd = nil
 	s.done = make(chan struct{})
 	launchFailure := func(err error) (model.Run, error) {
@@ -164,14 +182,21 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 		s.run.Lifecycle = model.Exited
 		s.run.EndedAt = &now
 		s.run.Outcome = &model.Outcome{Kind: model.LaunchFailed, Error: err.Error()}
+		if s.diskOutput != nil {
+			_ = s.diskOutput.Close()
+		}
 		m.persistLocked(s)
 		close(s.done)
-		return s.run.Clone(), err
+		return snapshotLocked(s), err
 	}
 	// Durable intent precedes exec: a crash in the launch/identity gap must
 	// leave a conservative blocker rather than permit an invisible duplicate.
 	if err := m.persistLocked(s); err != nil {
 		return launchFailure(fmt.Errorf("persist launch intent: %w", err))
+	}
+	if m.opts.LogStore != nil {
+		s.diskOutput = m.opts.LogStore.Create(s.definition.Alias, s.run.ID, s.outputLimit)
+		s.output = nil
 	}
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -202,7 +227,11 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 		s.run.Identity, s.run.Lifecycle = id, model.Running
 	}
 	captureDone := make(chan error, 1)
-	output := s.output
+	var output io.Writer = s.output
+	diskOutput := s.diskOutput
+	if diskOutput != nil {
+		output = diskOutput
+	}
 	go func() {
 		_, err := io.CopyBuffer(output, reader, make([]byte, 32*1024))
 		reader.Close()
@@ -344,6 +373,24 @@ func (m *Manager) Output(alias, runID string) ([]byte, bool, error) {
 	if runID == "" || s.run.ID != runID {
 		return nil, false, ErrRunChanged
 	}
+	if s.diskOutput != nil {
+		var data []byte
+		var after uint64
+		var truncated bool
+		for len(data) < MaxMemoryOutput {
+			read, err := s.diskOutput.Read(after, min(MaxLogRead, MaxMemoryOutput-len(data)))
+			if err != nil {
+				return data, truncated, err
+			}
+			data = append(data, read.Data...)
+			truncated = truncated || read.Truncated
+			if read.Next == after || len(read.Data) == 0 {
+				break
+			}
+			after = read.Next
+		}
+		return data, truncated, nil
+	}
 	data, truncated := s.output.snapshot()
 	return data, truncated, nil
 }
@@ -399,6 +446,10 @@ func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error) {
 		drainTimer.Stop()
 		now := time.Now()
 		s.run.Lifecycle, s.run.Outcome, s.run.EndedAt = model.Exited, &outcome, &now
+		if s.diskOutput != nil {
+			_ = s.diskOutput.Close()
+			s.run.LogEnd = s.diskOutput.End()
+		}
 		m.persistLocked(s)
 		close(s.done)
 		s.mu.Unlock()

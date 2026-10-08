@@ -1,8 +1,8 @@
 # lazyrun
 
 A Linux-first, keyboard-driven Go TUI for a project's named services and tasks.
-**Implementation in progress: detached supervision and a headless client work;
-the dashboard and disk logstore are still to come.**
+**Implementation in progress: detached supervision, bounded disk logs, and a
+headless client work; the dashboard is still to come.**
 
 ## Current status
 
@@ -14,8 +14,9 @@ the dashboard and disk logstore are still to come.**
 - **M3:** detached per-project supervisor, private versioned IPC, reconnect,
   configuration synchronization, atomic latest-run metadata, and conservative
   supervisor-loss handling. Real PTY tests cover terminal closure/client death.
-- **Next: M4:** bounded disk capture, timestamp records, rotation/gaps, and log
-  stress/error handling. **M5** adds the dashboard; **M6** hardens the release.
+- **M4:** bounded disk capture, timestamp records, incremental/tail reads,
+  rotation gaps, and visible disk/queue failures without blocking pipe draining.
+- **Next: M5** adds the dashboard; **M6** hardens the release.
 
 The headless CLI uses the detached supervisor, not an in-process execution path.
 Opening it starts no configured command; explicit start/restart requests do.
@@ -42,14 +43,21 @@ lazyrun --state                 # default; starts no commands
 lazyrun --start api             # uses this shell's current environment
 lazyrun --stop api              # SIGTERM only; query state for completion
 lazyrun --restart api           # graceful stop, then current definition
-lazyrun --logs api              # bounded JSON response; data is base64
+lazyrun --logs api              # recent tail; bounded JSON, data is base64
+lazyrun --logs api --tail 20     # recent lines, still bounded by bytes
+lazyrun --logs api --after 0     # oldest retained bytes
 lazyrun --logs api --run-id RUN_ID --after CURSOR
 ```
 
 Choose one action per invocation. All output is JSON except `--check`/help.
-Log responses include the run ID, `next` byte cursor, and `truncated` flag; reads
-are at most 64 KiB. Reuse `next` with the same run ID. Raw output is base64 rather
-than terminal-rendered, so control sequences cannot execute on display.
+Log responses include the run ID, `next` byte cursor, `truncated` flag, and
+capture-time `records` (each with its own byte cursor and timestamp). Reads carry
+at most 64 KiB of raw output. Initial reads use `logs.tail` (default 1,000 lines);
+`--tail 0` disables the line limit, not the byte limit. Reuse `next` with the same
+run ID and `--after`; `--tail` and `--after` are mutually exclusive. Raw output is
+base64 rather than terminal-rendered, so control sequences cannot execute on
+display. `error`/state `logError` report retention problems; `truncated` explicitly
+marks rotation or dropped-output gaps.
 
 Quitting, crashing, or closing the client's terminal leaves the supervisor and
 commands running. There is no bulk action or supervisor shutdown command in v1.
@@ -96,8 +104,9 @@ The example is configuration only: it does not install or bundle a Flask app.
   Names cannot be empty or contain `=`/NUL; values cannot contain NUL.
 - `cwd` defaults to the root; relative paths resolve against it. Absolute paths
   are allowed. Directory/executable existence is checked at launch, not parsing.
-- `tail` must be nonnegative; `maxBytes` must be positive. Log settings describe
-  the planned disk/UI behavior, not a disk logstore that exists today.
+- `tail` must be nonnegative; `maxBytes` must be positive. Retention budgets are
+  snapshotted per run; config changes apply to the next run. `timestamps` controls
+  future dashboard display, not whether capture times are recorded.
 - Symlinked invocation directories resolve to the physical project hierarchy.
   Distinct clones/worktrees have distinct identities.
 
@@ -141,11 +150,21 @@ Config updates affect the next run only. Active removed aliases remain visible
 and stoppable until completion; active moved aliases keep their original kind.
 Every reconnect synchronizes configuration; there is no live watcher.
 
-Output retention is still a temporary in-memory latest-run tail, capped by the
-smaller of `logs.maxBytes` and 2 MiB. It survives client reconnects, supports byte
-cursors/partial lines, and reports gaps, but has no disk persistence or timestamp
-chunks yet. Supervisor replacement reports historical output as `unavailable`
-instead of silently pretending an empty stream was retained. M4 adds disk logs;
+Latest-run logs live under the project's state directory in `logs/<alias-hash>/`.
+A four-slot file ring caps retained payload at `logs.maxBytes` (default 10 MiB),
+with at most 336 bytes of additional file-format overhead. Tiny budgets use fewer
+slots. Rotation and a bounded record index may retain less than the byte ceiling,
+particularly for tiny writes. A new run replaces the previous run's output.
+
+Capture uses a separate bounded queue (eight 32 KiB chunks). Disk writes/reads and
+slow clients never own pipe draining. If disks cannot keep up, older queued output
+is dropped explicitly; write failures disable retention for that run but continue
+draining. Inspect `logError`/log `error`, not just the command's exit status.
+Finalized files are synced before final metadata; verified logs remain readable
+across supervisor replacement. Abrupt loss may discard queued output or leave a
+torn last record, which is reported rather than trusted. Missing/older memory-only
+logs are `unavailable`, never silently substituted from another run.
+
 M5 must sanitize terminal rendering. Noninteractive programs may buffer output;
 Python can use `-u` or `PYTHONUNBUFFERED=1`.
 
@@ -169,8 +188,10 @@ make check              # formatting + vet + race tests
 Runtime fixtures use subprocesses; supervisor integration tests build the real
 binary (also race-instrumented under `go test -race`). They test concurrent launch,
 reconnect, private paths, stale sockets, compatibility, config changes, environment
-snapshots, metadata failures, supervisor loss, and real controlling-terminal
-hangup. No Flask/Celery installation is required. Test cleanup may force-kill its
+snapshots, metadata failures, supervisor loss, real controlling-terminal hangup,
+and disk-log reconnect/rotation. Logstore tests cover tiny budgets, huge/partial
+lines, invalid bytes, checksums/torn records, queue overload, ENOSPC/short writes,
+private paths, and bounded indexes. No Flask/Celery installation is required. Test cleanup may force-kill its
 verified fixtures; product Stop/Restart never escalates beyond SIGTERM.
 The Make targets disable Go's result cache (`-count=1`): subprocess builds can
 change even when the linked test runner itself has not changed.

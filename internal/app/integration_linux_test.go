@@ -321,6 +321,9 @@ func TestSupervisorReconnectConcurrencyAndEnvironment(t *testing.T) {
 	defer paths.Close()
 	names, _ := paths.State.Names()
 	for _, name := range names {
+		if name == "logs" {
+			continue
+		}
 		b, err := paths.State.Read(name, 8*1024*1024)
 		if err != nil {
 			t.Fatal(err)
@@ -422,6 +425,10 @@ services:
 	if state.Lifecycle != model.Unknown || state.ID != r.ID || state.Outcome != nil {
 		t.Fatalf("lost/fabricated run: %+v", state)
 	}
+	read, err := f.connection.Client.Logs(context.Background(), "stubborn", r.ID, 0, 0)
+	if err != nil || read.Unavailable || !strings.Contains(string(read.Data), "ready") || !strings.Contains(read.Error, "incomplete after supervisor loss") {
+		t.Fatal("lost verified pre-crash logs or concealed the incomplete tail", read, err)
+	}
 	for _, action := range []func() (model.Run, error){
 		func() (model.Run, error) { return f.connection.Client.Start(context.Background(), "stubborn", nil) },
 		func() (model.Run, error) { return f.connection.Client.Stop(context.Background(), "stubborn") },
@@ -452,8 +459,8 @@ func TestFinishedRunMetadataSurvivesSupervisorReplacement(t *testing.T) {
 		t.Fatal("lost final metadata", restored)
 	}
 	read, err := f.connection.Client.Logs(context.Background(), "done", restored.ID, 0, 0)
-	if err != nil || !read.Unavailable {
-		t.Fatal("silently claimed historical memory output remained available", read, err)
+	if err != nil || read.Unavailable || string(read.Data) != "final" || len(read.Records) == 0 {
+		t.Fatal("lost finalized disk output after supervisor replacement", read, err)
 	}
 }
 
