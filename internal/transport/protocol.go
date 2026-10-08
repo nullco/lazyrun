@@ -1,8 +1,11 @@
-// Package transport defines the initial protocol vocabulary. Socket framing,
-// request validation, compatibility checks, and client/server I/O belong to M3.
+// Package transport provides bounded, versioned JSON IPC over private Unix sockets.
 package transport
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"lazyrun/internal/model"
+)
 
 const ProtocolVersion = 1
 
@@ -39,13 +42,39 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+func (e *Error) Error() string { return fmt.Sprintf("%s: %s", e.Code, e.Message) }
+
+const (
+	CodeIncompatible   = "incompatible_protocol"
+	CodeInvalid        = "invalid_request"
+	CodeUnmanaged      = "unmanaged_run"
+	CodeAlreadyRunning = "already_running"
+	CodeRunChanged     = "run_changed"
+	CodeRemoved        = "removed_from_config"
+	CodeRestartPending = "restart_pending"
+	CodeRestartBlocked = "restart_blocked"
+	CodeUnknownAlias   = "unknown_alias"
+	CodeRuntime        = "runtime_error"
+)
+
+type Hello struct {
+	ProjectID     string                `json:"projectId"`
+	BinaryVersion string                `json:"binaryVersion"`
+	Supervisor    model.ProcessIdentity `json:"supervisor"`
+}
+
+// Configuration control messages carry raw validated YAML, not redacted state.
+type SyncPayload struct {
+	Config []byte `json:"config"`
+}
+
 type HandshakePayload struct {
 	ProjectID string `json:"projectId"`
 }
 
 type StartPayload struct {
 	Alias       string   `json:"alias"`
-	Environment []string `json:"environment"`
+	Environment [][]byte `json:"environment"` // Base64 preserves arbitrary Unix environment bytes.
 }
 
 type AliasPayload struct {
@@ -56,4 +85,5 @@ type ReadLogsPayload struct {
 	Alias string `json:"alias"`
 	RunID string `json:"runId"`
 	After uint64 `json:"after"`
+	Limit int    `json:"limit,omitempty"`
 }

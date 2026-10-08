@@ -1,0 +1,102 @@
+# Troubleshooting supervision
+
+## First checks
+
+Run `lazyrun --check` from the project (or a subdirectory). This validates config
+without launching a supervisor or command. `lazyrun --state` connects and shows
+current definitions separately from latest-run snapshots, including errors,
+PID/PGID/start ticks, and boot identity. It never starts a configured command.
+
+If a request returns an error, check state before retrying: a disconnect or a
+metadata failure can happen **after** a start/restart was accepted. The CLI prints
+any returned run identity even when it exits unsuccessfully. There are no implicit
+mutation retries.
+
+## Private paths and compatibility
+
+Runtime files live under `$XDG_RUNTIME_DIR/lazyrun/<project-id>/` or the private
+`/tmp/lazyrun-<uid>/<project-id>/` fallback. Metadata/diagnostics use
+`$XDG_STATE_HOME/lazyrun/<project-id>/` or `~/.local/state/lazyrun/<project-id>/`.
+The project ID is the SHA-256 of its canonical absolute root path.
+
+- Keep XDG runtime/state locations stable between clients. A changed runtime
+  location cannot acquire state ownership while the original supervisor runs.
+  Changing both namespaces while commands run is unsupported.
+- Directory symlinks, unexpected ownership, writable unsafe ancestors, nonprivate
+  file modes, or hardlinks are refused. Inspect the reported path instead of
+  recursively changing permissions or deleting a shared temporary directory.
+- An ownership lock with an unreachable socket is not permission to delete it or
+  launch a replacement. It may be initializing or unhealthy; inspect the owner.
+- An incompatible protocol is not a stale socket. Use a compatible binary or
+  deliberately stop/manage the old instance after checking its commands.
+- `diagnostic.log` is supervisor-only logging, bounded at approximately 1 MiB.
+  It is separate from command output; requests/environments are never logged.
+
+There is no multi-project registry or public supervisor-shutdown action yet.
+An idle supervisor remains available for reconnect. For manual maintenance,
+identify the exact process by executable, internal-mode root argument, user, and
+Linux process start identity; don't act on a PID from an old note alone.
+
+## A run is stuck stopping / restart was blocked
+
+Stop only sends SIGTERM to the owned process group. A command ignoring SIGTERM
+remains `stopping`; no automatic SIGKILL follows. Restart waits three seconds by
+default, then cancels its replacement. It does not queue a start for later.
+Ordinary descendants can keep a group alive after its shell exits.
+
+Inspect the command's shutdown behavior. Manual intervention outside lazyrun is
+your choice and requires verifying the current process/group identity. An old
+PID/PGID may have been reused; never blindly paste a stored ID into `kill`.
+
+## Supervisor loss / unknown runs
+
+Transparent crash recovery is not promised. Children may exit when their output
+pipe closes, or remain alive and unmanaged. Reconnection launches a replacement
+only after ownership is free, then conservatively inspects durable metadata:
+
+- Already collected outcomes are preserved.
+- Previous-boot or provably absent groups are historical, not running. If the old
+  supervisor never reaped the shell, its exit code/signal/end time is unavailable.
+- Occupied groups (including potentially reused PIDs), permission failures, and
+  incomplete pre-launch identity remain `unknown`. Start/stop/restart are blocked;
+  a stored identity **never** authorizes the new supervisor to terminate it.
+
+For cleanup:
+
+1. Preserve/inspect metadata and diagnostics. Inspect live processes using their
+   executable, command, working directory, boot/start identity, and group members.
+   Do not rely on the stored PID alone.
+2. Manually deal with only processes you have positively identified as yours.
+   If identity is ambiguous, leave the blocker in place rather than killing an
+   unrelated process or starting a possible duplicate.
+3. Once no old execution can survive, deliberately stop the replacement supervisor
+   (after identifying it) and reopen the project. Reconciliation can then recognize
+   an absent group. A running replacement does not automatically clear unknown
+   records based on later process disappearance.
+4. An incomplete intent has no durable PID and cannot prove absence automatically.
+   Only after verifying cleanup, back up and remove the **one alias record** while
+   no supervisor owns the state. Records are `<sha256(alias)>.json` within that
+   project's state directory. Corrupt/incompatible records similarly require
+   inspection; do not erase all state just to suppress an error.
+
+Never delete an ownership lock file while its owner is alive: a new inode can
+create a second lock domain. Do not recursively remove arbitrary `/tmp` paths.
+
+## Missing output or disk failures
+
+M3 output is a bounded memory tail, not disk logs. It survives dashboard/client
+reconnects while the same supervisor lives, but supervisor replacement reports
+historical output as `unavailable`. M4 will implement disk retention/rotation.
+Log reads are run-scoped byte cursors; `truncated` means the retained tail passed
+that cursor. Resume from the response's `next`; use the new run ID after rerun.
+
+Noninteractive output can be buffered: try Python `-u`/`PYTHONUNBUFFERED=1`.
+stdin is `/dev/null`; prompts, PTYs, and interactive commands are unsupported.
+Raw output is base64 in the headless CLI so terminal control sequences aren't
+rendered. Do not decode untrusted output straight into a terminal.
+
+A failed durable launch-intent write executes nothing. A metadata failure after
+launch/stop is reported as `metadataError`, but capture continues and the process
+remains owned. Fix disk space/permissions rather than repeatedly starting it.
+Latest-run metadata is atomically replaced; interrupted private temporary files
+are left for inspection, not blindly cleaned from shared locations.

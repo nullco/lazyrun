@@ -58,24 +58,30 @@ func Discover(dir string) (string, error) {
 }
 
 func Load(dir string) (model.Project, error) {
+	project, _, err := LoadBytes(dir)
+	return project, err
+}
+
+// LoadBytes returns the exact validated source for supervisor synchronization.
+func LoadBytes(dir string) (model.Project, []byte, error) {
 	path, err := Discover(dir)
 	if err != nil {
-		return model.Project{}, err
+		return model.Project{}, nil, err
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return model.Project{}, fmt.Errorf("open %s: %w", path, err)
+		return model.Project{}, nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, MaxConfigBytes+1))
 	if err != nil {
-		return model.Project{}, fmt.Errorf("read %s: %w", path, err)
+		return model.Project{}, nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	project, err := Parse(data, filepath.Dir(path))
 	if err != nil {
-		return model.Project{}, fmt.Errorf("%s: %w", path, err)
+		return model.Project{}, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return project, nil
+	return project, data, nil
 }
 
 // Parse preserves mapping order using YAML nodes, while explicitly validating

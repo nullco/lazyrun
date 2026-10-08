@@ -10,6 +10,7 @@ type memoryOutput struct {
 	data      []byte
 	limit     int
 	truncated bool
+	total     uint64
 }
 
 func (b *memoryOutput) Write(p []byte) (int, error) {
@@ -19,6 +20,7 @@ func (b *memoryOutput) Write(p []byte) (int, error) {
 		b.data = make([]byte, 0, b.limit)
 	}
 	n := len(p)
+	b.total += uint64(n)
 	if n >= b.limit {
 		b.truncated = b.truncated || len(b.data) > 0 || n > b.limit
 		b.data = append(b.data[:0], p[n-b.limit:]...)

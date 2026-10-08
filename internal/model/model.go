@@ -61,6 +61,20 @@ func ProjectID(root string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func (p Project) Clone() Project {
+	p.Services = cloneDefinitions(p.Services)
+	p.Tasks = cloneDefinitions(p.Tasks)
+	return p
+}
+
+func cloneDefinitions(defs []Definition) []Definition {
+	result := make([]Definition, len(defs))
+	for i, d := range defs {
+		result[i] = d.Clone()
+	}
+	return result
+}
+
 func (p Project) Definitions() []Definition {
 	defs := make([]Definition, 0, len(p.Services)+len(p.Tasks))
 	for _, d := range p.Services {
@@ -124,6 +138,7 @@ type Run struct {
 	StopRequested bool            `json:"stopRequested"`
 	Outcome       *Outcome        `json:"outcome,omitempty"`
 	Error         string          `json:"error,omitempty"`
+	MetadataError string          `json:"metadataError,omitempty"`
 }
 
 func (r Run) Clone() Run {

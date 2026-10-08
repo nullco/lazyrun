@@ -1,8 +1,8 @@
 //go:build linux
 
-// Package runtime is a headless process-group execution engine. It must be owned
-// by the future supervisor, never by a dashboard context. This M2 proof of concept
-// does not detach, persist state, recover other processes, or expose public IPC.
+// Package runtime is the supervisor-owned headless process-group engine.
+// Dashboard contexts never own command lifetimes. The supervisor supplies
+// durable metadata hooks; recorded processes never become owned exec.Cmds.
 package runtime
 
 import (
@@ -14,7 +14,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -32,6 +31,9 @@ var (
 	ErrRestartPending = errors.New("restart already pending")
 	ErrRestartBlocked = errors.New("restart blocked: old process group is still alive or unverified; replacement canceled")
 	ErrRunChanged     = errors.New("run ID no longer matches latest run")
+	ErrUnknownAlias   = errors.New("unknown alias")
+	ErrRemoved        = errors.New("alias removed from configuration; only stop is available")
+	ErrUnmanaged      = errors.New("run may be unmanaged after supervisor loss; manual cleanup required; no signaling or replacement allowed")
 )
 
 const MaxMemoryOutput = 2 * 1024 * 1024
@@ -40,35 +42,38 @@ type Options struct {
 	PollInterval   time.Duration
 	RestartTimeout time.Duration
 	DrainTimeout   time.Duration
+	Persist        func(model.Run) error // Called before launch intent and on state transitions.
 }
 
 type Manager struct {
-	projectID   string
-	shell       string
-	bootID      string
-	outputLimit int
-	opts        Options
-	// Aliases are fixed in M2; config synchronization belongs to M3. The map is
-	// immutable after New; each alias serializes its own mutations with slot.mu.
-	slots map[string]*slot
+	projectID string
+	bootID    string
+	opts      Options
+	mu        sync.RWMutex
+	project   model.Project
+	slots     map[string]*slot
 }
 
 type slot struct {
-	mu         sync.Mutex
-	definition model.Definition
-	run        model.Run
-	cmd        *exec.Cmd
-	output     *memoryOutput
-	done       chan struct{}
-	pending    bool
+	mu                sync.Mutex
+	definition        model.Definition
+	configured        bool
+	shell             string
+	outputLimit       int
+	run               model.Run
+	cmd               *exec.Cmd
+	output            *memoryOutput
+	outputUnavailable bool
+	done              chan struct{}
+	pending           bool
 }
 
 // New installs Linux child-subreaping, a process-wide setting required for
 // conservative group completion. Use this engine only in its owning supervisor
 // process; other code in that process must not reap its children independently.
 func New(project model.Project, opts Options) (*Manager, error) {
-	if project.ID == "" || !filepath.IsAbs(project.Shell) || strings.ContainsRune(project.Shell, 0) {
-		return nil, errors.New("project ID and absolute shell executable are required")
+	if err := validateProject(project); err != nil {
+		return nil, err
 	}
 	if opts.PollInterval < 0 || opts.RestartTimeout < 0 || opts.DrainTimeout < 0 {
 		return nil, errors.New("runtime timeouts must not be negative")
@@ -86,25 +91,9 @@ func New(project model.Project, opts Options) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read Linux boot identity: %w", err)
 	}
-	limit := project.Logs.MaxBytes
-	if limit <= 0 {
-		return nil, errors.New("output limit must be positive")
-	}
-	if limit > MaxMemoryOutput {
-		limit = MaxMemoryOutput
-	}
-	m := &Manager{projectID: project.ID, shell: project.Shell, bootID: strings.TrimSpace(string(boot)), outputLimit: int(limit), opts: opts, slots: make(map[string]*slot)}
-	for _, d := range project.Definitions() {
-		if d.Alias == "" || strings.TrimSpace(d.Command) == "" || strings.ContainsRune(d.Command, 0) || !filepath.IsAbs(d.Cwd) || strings.ContainsRune(d.Cwd, 0) || (d.Kind != model.Service && d.Kind != model.Task) {
-			return nil, fmt.Errorf("invalid definition for alias %q", d.Alias)
-		}
-		if _, ok := m.slots[d.Alias]; ok {
-			return nil, fmt.Errorf("duplicate alias %q", d.Alias)
-		}
-		if _, err := environment(nil, d.Env); err != nil {
-			return nil, fmt.Errorf("alias %s: %w", d.Alias, err)
-		}
-		m.slots[d.Alias] = &slot{definition: d, run: model.Run{ProjectID: project.ID, Definition: d.Clone(), Shell: project.Shell, Lifecycle: model.NotStarted}}
+	m := &Manager{projectID: project.ID, bootID: strings.TrimSpace(string(boot)), opts: opts, slots: make(map[string]*slot)}
+	if err := m.Sync(project); err != nil {
+		return nil, err
 	}
 	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
 		return nil, fmt.Errorf("enable Linux child-subreaping: %w", err)
@@ -113,9 +102,11 @@ func New(project model.Project, opts Options) (*Manager, error) {
 }
 
 func (m *Manager) lookup(alias string) (*slot, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	s, ok := m.slots[alias]
 	if !ok {
-		return nil, fmt.Errorf("unknown alias %q", alias)
+		return nil, fmt.Errorf("%w %q", ErrUnknownAlias, alias)
 	}
 	return s, nil
 }
@@ -147,7 +138,13 @@ func (m *Manager) Start(alias string, env []string) (model.Run, error) {
 
 func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 	if s.run.Lifecycle.Active() {
+		if s.cmd == nil {
+			return s.run.Clone(), ErrUnmanaged
+		}
 		return s.run.Clone(), ErrAlreadyRunning
+	}
+	if !s.configured {
+		return s.run.Clone(), ErrRemoved
 	}
 	environment, err := environment(env, s.definition.Env)
 	if err != nil {
@@ -157,22 +154,30 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 	if _, err := rand.Read(bytes[:]); err != nil {
 		return s.run.Clone(), fmt.Errorf("create run ID: %w", err)
 	}
-	s.run = model.Run{ID: hex.EncodeToString(bytes[:]), ProjectID: m.projectID, Definition: s.definition.Clone(), Shell: m.shell, Lifecycle: model.Starting, StartedAt: time.Now()}
-	s.output = &memoryOutput{limit: m.outputLimit}
+	s.run = model.Run{ID: hex.EncodeToString(bytes[:]), ProjectID: m.projectID, Definition: s.definition.Clone(), Shell: s.shell, Lifecycle: model.Starting, StartedAt: time.Now(), Identity: model.ProcessIdentity{BootID: m.bootID}}
+	s.output = &memoryOutput{limit: s.outputLimit}
+	s.outputUnavailable = false
+	s.cmd = nil
 	s.done = make(chan struct{})
 	launchFailure := func(err error) (model.Run, error) {
 		now := time.Now()
 		s.run.Lifecycle = model.Exited
 		s.run.EndedAt = &now
 		s.run.Outcome = &model.Outcome{Kind: model.LaunchFailed, Error: err.Error()}
+		m.persistLocked(s)
 		close(s.done)
 		return s.run.Clone(), err
+	}
+	// Durable intent precedes exec: a crash in the launch/identity gap must
+	// leave a conservative blocker rather than permit an invisible duplicate.
+	if err := m.persistLocked(s); err != nil {
+		return launchFailure(fmt.Errorf("persist launch intent: %w", err))
 	}
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return launchFailure(fmt.Errorf("create output pipe: %w", err))
 	}
-	cmd := exec.Command(m.shell, "-c", s.definition.Command)
+	cmd := exec.Command(s.shell, "-c", s.definition.Command)
 	cmd.Dir, cmd.Env = s.definition.Cwd, environment
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// A nil stdin is /dev/null. Use explicit files rather than exec's copying
@@ -204,6 +209,10 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 		captureDone <- err
 	}()
 	go m.monitor(s, reader, captureDone)
+	persistErr := m.persistLocked(s)
+	if err == nil {
+		err = persistErr
+	}
 	return s.run.Clone(), err
 }
 
@@ -222,12 +231,16 @@ func (m *Manager) stopLocked(s *slot) error {
 	if !s.run.Lifecycle.Active() {
 		return ErrNoActiveRun
 	}
+	if s.cmd == nil {
+		return ErrUnmanaged
+	}
 	if err := terminateGroup(s.run.Identity); err != nil {
 		s.run.Lifecycle, s.run.Error = model.Unknown, err.Error()
+		m.persistLocked(s)
 		return err
 	}
 	s.run.StopRequested, s.run.Lifecycle = true, model.Stopping
-	return nil
+	return m.persistLocked(s)
 }
 
 // Restart reserves one replacement per alias. A bounded timeout cancels it;
@@ -240,10 +253,21 @@ func (m *Manager) Restart(alias string, env []string) (model.Run, error) {
 	}
 	// Copy/validate the request before a possibly lengthy graceful stop.
 	env = append([]string(nil), env...)
+	s.mu.Lock()
 	if _, err := environment(env, s.definition.Env); err != nil {
+		s.mu.Unlock()
 		return model.Run{}, err
 	}
-	s.mu.Lock()
+	if !s.configured {
+		r := s.run.Clone()
+		s.mu.Unlock()
+		return r, ErrRemoved
+	}
+	if s.run.Lifecycle.Active() && s.cmd == nil {
+		r := s.run.Clone()
+		s.mu.Unlock()
+		return r, ErrUnmanaged
+	}
 	if s.pending {
 		r := s.run.Clone()
 		s.mu.Unlock()
@@ -331,7 +355,10 @@ func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error) {
 		s.mu.Lock()
 		alive, err := groupAlive(s.run.Identity)
 		if err != nil {
-			s.run.Lifecycle, s.run.Error = model.Unknown, err.Error()
+			if s.run.Lifecycle != model.Unknown || s.run.Error != err.Error() {
+				s.run.Lifecycle, s.run.Error = model.Unknown, err.Error()
+				m.persistLocked(s)
+			}
 			s.mu.Unlock()
 			continue // Fail closed: no reaping/replacement/signaling unverified PIDs.
 		}
@@ -341,6 +368,7 @@ func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error) {
 				if s.run.StopRequested {
 					s.run.Lifecycle = model.Stopping
 				}
+				m.persistLocked(s)
 			}
 			s.mu.Unlock()
 			continue
@@ -348,7 +376,10 @@ func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error) {
 		// No executing members remain. Keep the slot locked while reaping and
 		// finishing capture so Stop can never signal a now-reusable PGID.
 		if err := reapDescendants(s.run.Identity); err != nil {
-			s.run.Lifecycle, s.run.Error = model.Unknown, err.Error()
+			if s.run.Lifecycle != model.Unknown || s.run.Error != err.Error() {
+				s.run.Lifecycle, s.run.Error = model.Unknown, err.Error()
+				m.persistLocked(s)
+			}
 			s.mu.Unlock()
 			continue
 		}
@@ -368,6 +399,7 @@ func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error) {
 		drainTimer.Stop()
 		now := time.Now()
 		s.run.Lifecycle, s.run.Outcome, s.run.EndedAt = model.Exited, &outcome, &now
+		m.persistLocked(s)
 		close(s.done)
 		s.mu.Unlock()
 		return

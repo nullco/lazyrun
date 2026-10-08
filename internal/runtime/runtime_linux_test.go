@@ -45,7 +45,7 @@ func manager(t *testing.T, commands map[string]string, opts Options) *Manager {
 	t.Cleanup(func() {
 		for _, s := range m.slots {
 			s.mu.Lock()
-			if s.run.Lifecycle.Active() && verifyLeader(s.run.Identity) == nil {
+			if s.cmd != nil && s.run.Lifecycle.Active() && verifyLeader(s.run.Identity) == nil {
 				_ = unix.Kill(-s.run.Identity.PGID, unix.SIGKILL)
 			}
 			id, done := s.run.ID, s.done
@@ -146,7 +146,7 @@ func TestOneShotOutcomesAndCapture(t *testing.T) {
 
 func TestOSLaunchFailure(t *testing.T) {
 	m := manager(t, map[string]string{"x": "echo hello"}, Options{})
-	m.shell = "/does/not/exist/lazyrun"
+	m.slots["x"].shell = "/does/not/exist/lazyrun"
 	r, err := m.Start("x", nil)
 	if err == nil || r.Lifecycle != model.Exited || r.Outcome.Kind != model.LaunchFailed || r.Outcome.ExitCode != nil || r.Identity.PID != 0 {
 		t.Fatalf("%+v, %v", r, err)
