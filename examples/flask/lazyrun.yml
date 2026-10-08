@@ -1,0 +1,22 @@
+version: 1
+name: flask-app
+
+services:
+  api:
+    command: .venv/bin/python -u -m flask run --debug
+    env:
+      FLASK_APP: app
+  worker:
+    command: .venv/bin/celery -A app.celery worker --loglevel=info
+
+tasks:
+  migrate:
+    command: .venv/bin/flask db upgrade
+  tests:
+    command: .venv/bin/python -m pytest
+    cwd: .
+
+logs:
+  timestamps: false
+  tail: 1000
+  maxBytes: 10485760
