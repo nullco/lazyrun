@@ -51,7 +51,7 @@ func (d *dashboard) mouseClick(g *gocui.Gui, p pane, x, y int) {
 	width, height := v.Size()
 	// Border and empty-space clicks focus the pane but never select a nearby
 	// row. Use the last rendered alias so a state update cannot shift the hit.
-	if (p == servicesPane || p == tasksPane) && x >= 0 && x < width && y >= 0 && y < height && y < len(d.visibleAliases[p]) {
+	if !d.collapsed[p] && (p == servicesPane || p == tasksPane) && x >= 0 && x < width && y >= 0 && y < height && y < len(d.visibleAliases[p]) {
 		alias := d.visibleAliases[p][y]
 		for _, item := range d.items(p) {
 			if item.Run.Definition.Alias == alias {
@@ -67,6 +67,11 @@ func (d *dashboard) mouseWheel(p pane, delta int) {
 	if d.small || d.help || d.searchEditing {
 		return
 	}
+	collapsed := d.collapsed[p]
 	d.setFocus(p)
-	d.move(delta)
+	// A header has no scrollable content yet. Expand it first, without moving
+	// an invisible selection or using the previous log pane's dimensions.
+	if !collapsed {
+		d.move(delta)
+	}
 }

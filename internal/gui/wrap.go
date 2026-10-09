@@ -133,8 +133,22 @@ func (w *wrappedLayout) visible(row, count int, query string) []logLine {
 // This keeps paused anchors stable as new lines arrive or old lines are evicted.
 type logPosition struct{ line, row int }
 
-func (d *dashboard) logPosition() logPosition     { return logPosition{d.top, d.wrapTop} }
-func (d *dashboard) setLogPosition(p logPosition) { d.top, d.wrapTop = p.line, p.row }
+// Retain the original column through repeated reflows. Deriving the next anchor
+// from each rounded row start would gradually drift backwards on every resize.
+type wrapResizeAnchor struct {
+	position logPosition
+	cursor   uint64
+	column   int
+	width    int
+}
+
+func (d *dashboard) logPosition() logPosition { return logPosition{d.top, d.wrapTop} }
+func (d *dashboard) setLogPosition(p logPosition) {
+	if p != d.logPosition() {
+		d.resizeAnchor = nil
+	}
+	d.top, d.wrapTop = p.line, p.row
+}
 func (d *dashboard) shiftLogPosition(p logPosition, delta int) logPosition {
 	if len(d.buffer.lines) == 0 {
 		return logPosition{}
@@ -173,11 +187,20 @@ func (d *dashboard) resizeLogs(width int) {
 	}
 	column := 0
 	if d.top < len(d.buffer.lines) && d.logWidth > 0 {
-		column = d.buffer.lines[d.top].wrapped(d.logWidth).point(d.wrapTop).column
+		line := &d.buffer.lines[d.top]
+		anchor := d.resizeAnchor
+		if anchor != nil && anchor.position == d.logPosition() && anchor.cursor == line.cursor && anchor.width == d.logWidth {
+			column = anchor.column
+		} else {
+			column = line.wrapped(d.logWidth).point(d.wrapTop).column
+		}
 	}
 	d.logWidth = width
+	d.resizeAnchor = nil
 	if d.top < len(d.buffer.lines) {
-		d.wrapTop = d.buffer.lines[d.top].wrapped(width).rowAt(column)
+		line := &d.buffer.lines[d.top]
+		d.wrapTop = line.wrapped(width).rowAt(column)
+		d.resizeAnchor = &wrapResizeAnchor{position: d.logPosition(), cursor: line.cursor, column: column, width: width}
 	}
 }
 func (d *dashboard) visibleLogs() []logLine {

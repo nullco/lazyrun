@@ -69,7 +69,7 @@ func TestLogSearchShortcutsOnlyAffectFocusedLogs(t *testing.T) {
 }
 
 func TestLogSearchUsesGenericFooterInputAndStatusIsLocal(t *testing.T) {
-	for _, size := range [][2]int{{MinWidth, MinHeight}, {100, 30}} {
+	for _, size := range [][2]int{{MinWidth, MinHeight}, {wideWidth, wideHeight}, {100, 30}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: size[0], Height: size[1], OutputMode: gocui.OutputTrue, SupportOverlaps: true})
 			if err != nil {
@@ -85,7 +85,7 @@ func TestLogSearchUsesGenericFooterInputAndStatusIsLocal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			log := geometry(size[0], size[1])["detail"]
+			log := responsiveGeometry(size[0], size[1], d.focus, d.owner).areas["detail"]
 			if x0 != -1 || x1 != size[0] || y0 != size[1]-2 || y1 != size[1] || y0 < log.y1 {
 				t.Fatal("input did not stay in the full-width bottom row", x0, y0, x1, y1, log)
 			}

@@ -7,8 +7,8 @@ import (
 	"github.com/nullco/lazyrun/internal/model"
 )
 
-// Keep primary actions and help/quit visible at the minimum width. Append
-// secondary hints only when the entire hint fits, never a clipped key/action.
+// Reserve help/quit at every supported width. Prefer the primary actions that
+// fit, then append complete secondary hints, never a clipped key/action.
 func (d *dashboard) footerHints(width int) string {
 	var primary, secondary []string
 	switch {
@@ -54,11 +54,31 @@ func (d *dashboard) footerHints(width int) string {
 		primary = []string{"Tab: focus", "1/2/3: panes"}
 		secondary = []string{"Enter: details", "Shift-Tab: back"}
 	}
-	primary = append(primary, "q: quit")
-	if !d.help {
-		primary = append(primary, "?: help")
+	if width < wideWidth {
+		switch {
+		case d.logPaneFocused():
+			primary = []string{"/: search"}
+			if d.searchQuery != "" {
+				primary = append(primary, "n/N: jump")
+			}
+			primary = append(primary, "G: follow", "PgUp/PgDn: scroll")
+		case (d.focus == servicesPane || d.focus == tasksPane) && len(primary) > 1:
+			secondary = append([]string{primary[0]}, secondary...)
+			primary = primary[1:]
+		}
 	}
-	text := strings.Join(primary, ", ")
+	required := []string{"q: quit"}
+	if !d.help {
+		required = append(required, "?: help")
+	}
+	var shown []string
+	for _, hint := range primary {
+		candidate := append(append(append([]string{}, shown...), hint), required...)
+		if runewidth.StringWidth(strings.Join(candidate, ", ")) <= width {
+			shown = append(shown, hint)
+		}
+	}
+	text := strings.Join(append(shown, required...), ", ")
 	for _, hint := range secondary {
 		candidate := text + ", " + hint
 		if runewidth.StringWidth(candidate) > width {

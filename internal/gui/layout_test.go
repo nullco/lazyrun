@@ -8,8 +8,8 @@ import (
 )
 
 func TestGeometryKeepsSeparateAdjacentBordersWithoutBlankGaps(t *testing.T) {
-	for width := MinWidth; width <= 200; width++ {
-		for height := MinHeight; height <= 65; height++ {
+	for width := wideWidth; width <= 200; width++ {
+		for height := wideHeight; height <= 65; height++ {
 			areas := geometry(width, height)
 			project, services, tasks, detail := areas["project"], areas["services"], areas["tasks"], areas["detail"]
 			if services.y0-project.y1 != 1 || tasks.y0-services.y1 != 1 {
@@ -37,8 +37,8 @@ func TestGeometryKeepsSeparateAdjacentBordersWithoutBlankGaps(t *testing.T) {
 	}
 }
 
-func TestHeadlessLayoutAppliesCompactRoundedPanesAtMinimumAndLargerSizes(t *testing.T) {
-	for _, size := range [][2]int{{MinWidth, MinHeight}, {100, 30}, {180, 50}} {
+func TestHeadlessLayoutAppliesRoundedPanesAtWideAndLargerSizes(t *testing.T) {
+	for _, size := range [][2]int{{wideWidth, wideHeight}, {100, 30}, {180, 50}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: size[0], Height: size[1], OutputMode: gocui.OutputTrue, SupportOverlaps: true})
 			if err != nil {

@@ -22,6 +22,7 @@ type navigation struct {
 	logWidth, logHeight      int
 	wrapTop                  int
 	wrapTarget               *wrapTarget
+	resizeAnchor             *wrapResizeAnchor
 	streamFirst, streamEnd   uint64
 	searchEditing            bool
 	searchDraft, searchQuery string
@@ -89,6 +90,7 @@ func (d *dashboard) resetNavigation() {
 	d.streamEnd = 0
 	d.wrapTop = 0
 	d.wrapTarget = nil
+	d.resizeAnchor = nil
 }
 func (d *dashboard) queueWindow(anchor uint64, before, delta int) {
 	item, ok := d.current()

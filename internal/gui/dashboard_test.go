@@ -347,7 +347,7 @@ func TestHeadlessLayoutEmptyStatesHelpAndViewportBound(t *testing.T) {
 	for width := 0; width < 160; width++ {
 		for height := 0; height < 50; height++ {
 			areas := geometry(width, height)
-			if width < MinWidth || height < MinHeight {
+			if width < wideWidth || height < wideHeight {
 				if areas != nil {
 					t.Fatal(width, height)
 				}

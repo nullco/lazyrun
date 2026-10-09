@@ -9,7 +9,7 @@ and [lazygit](https://github.com/jesseduffield/lazygit).
 - Start, stop, and restart named commands from one dashboard.
 - Commands keep running when you close the dashboard; reconnect anytime.
 - Wrapped, colored logs with live follow, history paging, and retained-log search.
-- Keyboard and mouse navigation, plus a headless CLI.
+- Keyboard and mouse navigation, adaptive pane layouts, and a headless CLI.
 - Per-project configuration in `lazyrun.yml`. Nothing starts automatically.
 
 ## Quick start
@@ -52,7 +52,9 @@ lazyrun
 Select a command, then press `S` to start/run, `s` to stop, or `r` to restart.
 Use `Tab` to switch panes and `Enter` to focus Logs. `/` searches in focused
 Logs; `G` resumes following. Press `?` for help and `q` to quit the dashboard
-without stopping commands.
+without stopping commands. On small screens, inactive panes collapse to clickable
+headers; narrow screens keep Logs/Details below the list accordion
+(minimum 40 columns × 10 rows).
 
 Stop sends process-group `SIGTERM` only—never an automatic force-kill.
 Commands are not guaranteed to survive logout, reboot, or supervisor failure.

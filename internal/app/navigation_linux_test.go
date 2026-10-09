@@ -101,7 +101,9 @@ func TestLogNavigationWindowAndSearchThroughIPC(t *testing.T) {
 
 func TestDashboardWrapsLongLinesScrollsAndReflowsAfterResize(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
-	text := "WRAP-BEGIN " + strings.Repeat("x", 800) + " WRAP-MIDDLE " + strings.Repeat("y", 800) + " WRAP-END\n"
+	// Keep the end marker within one row at both log widths (64 and 68).
+	// The PTY observer sees terminal writes, not reconstructed wrapped text.
+	text := "WRAP-BEGIN " + strings.Repeat("x", 800) + " WRAP-MIDDLE " + strings.Repeat("y", 799) + " WRAP-END\n"
 	command := "printf '%s' '" + text + "'"
 	f := newIntegration(t, fmt.Sprintf("version: 1\nlogs: {timestamps: false}\ntasks:\n  wrapped:\n    command: %q\n", command))
 	run, err := f.connection.Client.Start(context.Background(), "wrapped", nil)

@@ -198,7 +198,7 @@ func TestHeadlessLogPaneWrapsWithoutRetainingOffscreenCells(t *testing.T) {
 	defer g.Close()
 	d := navigationDashboard(t)
 	d.loaded, d.follow = true, false
-	area := geometry(MinWidth, MinHeight)["detail"]
+	area := responsiveGeometry(MinWidth, MinHeight, d.focus, d.owner).areas["detail"]
 	width := area.x1 - area.x0 - 1
 	d.buffer.append([]byte(strings.Repeat("x", width)+"VISIBLE-SUFFIX"), time.Time{})
 	if err := d.layout(g); err != nil {
@@ -217,6 +217,31 @@ func TestHeadlessLogPaneWrapsWithoutRetainingOffscreenCells(t *testing.T) {
 	}
 	if len(v.Buffer()) > MinWidth*MinHeight {
 		t.Fatal("huge line expanded into gocui cells", len(v.Buffer()))
+	}
+}
+
+func TestRepeatedLogReflowPreservesColumnUntilScrolling(t *testing.T) {
+	d := navigationDashboard(t)
+	d.cancelWindow()
+	d.loaded, d.follow = true, false
+	d.buffer.append([]byte(strings.Repeat("x", 10000)), time.Time{})
+	d.logWidth, d.logHeight, d.wrapTop = 64, 4, 5
+	for _, width := range []int{38, 43, 48, 64} {
+		d.resizeLogs(width)
+		column := d.buffer.lines[0].wrapped(width).point(d.wrapTop).column
+		if column > 320 || column+width <= 320 {
+			t.Fatal("reflow drifted away from the original column", width, column)
+		}
+		_ = d.visibleLogs()
+	}
+	if d.wrapTop != 5 {
+		t.Fatal("returning to the original width lost the paused row", d.wrapTop)
+	}
+	d.scrollLogs(1)
+	d.resizeLogs(43)
+	d.resizeLogs(64)
+	if d.wrapTop != 6 {
+		t.Fatal("scrolling did not establish a new reflow anchor", d.wrapTop)
 	}
 }
 

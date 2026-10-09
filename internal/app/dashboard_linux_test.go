@@ -133,7 +133,7 @@ func TestDashboardKeyboardActionsReconnectResizeAndQuit(t *testing.T) {
 	keys(t, master, "G")
 	eventuallyIntegration(t, func() bool { return out.contains("following") })
 	out.clear()
-	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 10, Col: 40}); err != nil {
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 9, Col: 39}); err != nil {
 		t.Fatal(err)
 	}
 	eventuallyIntegration(t, func() bool { return out.contains("Terminal too small") })

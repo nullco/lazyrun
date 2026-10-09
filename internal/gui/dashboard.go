@@ -83,6 +83,7 @@ type dashboard struct {
 	focus, owner               pane
 	selected                   [4]string
 	visibleAliases             [4][]string // last rendered command rows, not current state order
+	collapsed                  [4]bool     // last rendered pane visibility, including mouse headers
 	tab                        int
 	help                       bool
 	small                      bool

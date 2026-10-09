@@ -200,7 +200,7 @@ func TestRenderedThemeTracksFocusSelectionAndHelp(t *testing.T) {
 }
 
 func TestSelectionHighlightFollowsScrollingAndClearsWhenUnfocused(t *testing.T) {
-	g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: MinWidth, Height: MinHeight, OutputMode: gocui.OutputTrue, SupportOverlaps: true})
+	g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: wideWidth, Height: wideHeight, OutputMode: gocui.OutputTrue, SupportOverlaps: true})
 	if err != nil {
 		t.Fatal(err)
 	}

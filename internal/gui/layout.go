@@ -10,14 +10,17 @@ import (
 )
 
 const (
-	MinWidth  = 70
-	MinHeight = 18
+	MinWidth  = 40
+	MinHeight = 10
+	// Keep enough room for a useful list and log preview before splitting.
+	wideWidth  = 100
+	wideHeight = 24
 )
 
 type rectangle struct{ x0, y0, x1, y1 int }
 
 func geometry(width, height int) map[string]rectangle {
-	if width < MinWidth || height < MinHeight {
+	if width < wideWidth || height < wideHeight {
 		return nil
 	}
 	left := max(24, min(42, width/3))
@@ -35,6 +38,70 @@ func geometry(width, height int) map[string]rectangle {
 		"detail":   {left + separation, 0, width - 1, bottom},
 		"footer":   {-1, bottom, width, height},
 	}
+}
+
+// A collapsed pane is a borderless, one-row header, using the same view name
+// and input bindings as its expanded pane. Rectangles include virtual borders.
+type paneLayout struct {
+	areas     map[string]rectangle
+	collapsed [4]bool
+}
+
+func responsiveGeometry(width, height int, focus, owner pane) *paneLayout {
+	if width < MinWidth || height < MinHeight {
+		return nil
+	}
+	if areas := geometry(width, height); areas != nil {
+		return &paneLayout{areas: areas}
+	}
+	layout := &paneLayout{areas: map[string]rectangle{
+		"footer": {-1, height - 2, width, height},
+	}}
+	if width < wideWidth {
+		// Keep output visible beneath the list accordion. Give it most of the
+		// height, and collapse all lists when output itself takes focus.
+		listHeight := 3
+		if focus != detailPane {
+			listHeight = min(height-5, max(6, (height-1)/3))
+		}
+		layout.stack(0, width-1, listHeight, []pane{projectPane, servicesPane, tasksPane}, focus)
+		layout.areas["detail"] = rectangle{0, listHeight, width - 1, height - 2}
+	} else {
+		left := max(24, min(42, width/3))
+		active := focus
+		if active == detailPane {
+			active = owner
+		}
+		layout.stack(0, left, height-1, []pane{projectPane, servicesPane, tasksPane}, active)
+		layout.areas["detail"] = rectangle{left + 1, 0, width - 1, height - 2}
+	}
+	return layout
+}
+
+func (l *paneLayout) stack(left, right, height int, panes []pane, active pane) {
+	y := 0
+	for _, p := range panes {
+		if p == active {
+			rows := height - len(panes) + 1
+			l.areas[paneNames[p]] = rectangle{left, y, right, y + rows - 1}
+			y += rows
+		} else {
+			l.collapsed[p] = true
+			l.areas[paneNames[p]] = rectangle{left - 1, y - 1, right + 1, y + 1}
+			y++
+		}
+	}
+}
+
+func paneView(g *gocui.Gui, name, title string, r rectangle, collapsed bool) (*gocui.View, error) {
+	v, err := view(g, name, title, r, !collapsed)
+	if err == nil && collapsed {
+		v.Title = ""
+		width, _ := v.Size()
+		label := crop("─ "+singleLine(title)+" ", "", 0, width)
+		fmt.Fprint(v, label, strings.Repeat("─", max(0, width-runewidth.StringWidth(label))))
+	}
+	return v, err
 }
 
 func view(g *gocui.Gui, name, title string, r rectangle, frame bool) (*gocui.View, error) {
@@ -77,13 +144,14 @@ func textLines(text string) []logLine {
 func (d *dashboard) layout(g *gocui.Gui) error {
 	configureTheme(g)
 	width, height := g.Size()
-	areas := geometry(width, height)
+	plan := responsiveGeometry(width, height, d.focus, d.owner)
 	wasSmall := d.small
-	d.small = areas == nil
+	d.small = plan == nil
 	if wasSmall != d.small {
 		d.syncLogView()
 	}
 	if d.small {
+		g.Cursor = false
 		for _, name := range []string{"project", "services", "tasks", "detail", "footer", "help", "search"} {
 			_ = g.DeleteView(name)
 		}
@@ -96,11 +164,17 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		return err
 	}
 	_ = g.DeleteView("minimum")
+	areas := plan.areas
+	d.collapsed = plan.collapsed
 	connection := "connected"
 	if !d.connected {
 		connection = "DISCONNECTED: " + d.connectionError
 	}
-	v, err := view(g, "project", "1 Project", areas["project"], true)
+	projectTitle := "1 Project"
+	if !d.connected {
+		projectTitle += " - DISCONNECTED"
+	}
+	v, err := paneView(g, "project", projectTitle, areas["project"], d.collapsed[projectPane])
 	if err != nil {
 		return err
 	}
@@ -108,16 +182,21 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	if !d.connected {
 		connectionStyle = styleRed
 	}
-	putLines(v, textLines(coloredLabel(singleLine(d.state.Project.Name), "\x1b[1;36m")+"\n"+coloredLabel(singleLine(d.state.Project.Root), styleMuted)+"\n"+coloredLabel(connection, connectionStyle)), 0, 0)
+	if !d.collapsed[projectPane] {
+		putLines(v, textLines(coloredLabel(singleLine(d.state.Project.Name), "\x1b[1;36m")+"\n"+coloredLabel(singleLine(d.state.Project.Root), styleMuted)+"\n"+coloredLabel(connection, connectionStyle)), 0, 0)
+	}
 	for _, p := range []pane{servicesPane, tasksPane} {
 		name := paneNames[p]
 		title := fmt.Sprintf("%d %s", p+1, strings.ToUpper(name[:1])+name[1:])
-		v, err := view(g, name, title, areas[name], true)
+		v, err := paneView(g, name, title, areas[name], d.collapsed[p])
 		if err != nil {
 			return err
 		}
 		clear(d.visibleAliases[p])
 		d.visibleAliases[p] = d.visibleAliases[p][:0]
+		if d.collapsed[p] {
+			continue
+		}
 		items := d.items(p)
 		if len(items) == 0 {
 			v.FgColor = gocui.ColorWhite | gocui.AttrDim
@@ -302,7 +381,7 @@ Enter / Esc       Focus details / return to owning pane
 [ / ]             Switch Logs / Details
 PgUp / PgDn       Scroll by ten rows; Logs wrap to pane width
 Left / Right      Scroll Details sideways
-Left click        Focus pane; select a clicked command (no lifecycle action)
+Left click        Expand header; focus pane/select command (no lifecycle action)
 Mouse wheel       Navigate hovered list; scroll Logs / Details / Help
 Home / G          Earliest retained output / return to live follow
 / (focused Logs)  Literal, case-sensitive search of all retained run output
@@ -316,4 +395,6 @@ r                 Restart service / rerun task (stop before start)
 Logs follow by default; scrolling pauses. G resumes following.
 Config changes affect the next run; reopen to synchronize.
 ? / Esc           Toggle / dismiss this help
-q / Ctrl-C        Quit dashboard ONLY; commands continue`
+q / Ctrl-C        Quit dashboard ONLY; commands continue
+
+Small screens: lists collapse; narrow layouts keep Logs/Details at the bottom.`

@@ -35,7 +35,7 @@ func TestFooterHintsShowFocusedPaneActionsAndFitOneRow(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			d := testDashboard(t, &fakeClient{})
 			test.setup(d)
-			for width := MinWidth; width <= 200; width++ {
+			for width := wideWidth; width <= 200; width++ {
 				text := d.footerHints(width)
 				if runewidth.StringWidth(text) > width {
 					t.Fatal("footer exceeds one row", width, text)
@@ -59,7 +59,7 @@ func TestFooterHintsShowFocusedPaneActionsAndFitOneRow(t *testing.T) {
 }
 
 func TestFooterLayoutRendersSingleBlueShortcutRow(t *testing.T) {
-	for _, size := range [][2]int{{MinWidth, MinHeight}, {100, 24}, {180, 50}} {
+	for _, size := range [][2]int{{MinWidth, MinHeight}, {wideWidth, wideHeight}, {100, 24}, {180, 50}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: size[0], Height: size[1], OutputMode: gocui.OutputTrue, SupportOverlaps: true})
 			if err != nil {
