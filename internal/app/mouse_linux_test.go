@@ -35,7 +35,7 @@ tasks:
 	out := watchTerminal(t, master)
 	eventuallyIntegration(t, func() bool { return out.contains("Services") && out.contains("Tasks") })
 	out.clear()
-	terminalMouse(t, master, 0, 4, 15) // second task row: failure
+	terminalMouse(t, master, 0, 4, 16) // second task row: failure
 	eventuallyIntegration(t, func() bool { return out.contains("failure:") })
 	for _, item := range f.state().Commands {
 		if item.Run.ID != "" {
@@ -65,7 +65,7 @@ tasks:
 	out.clear()
 	terminalMouse(t, master, 65, 40, 4) // wheel scrolls the modal itself
 	eventuallyIntegration(t, func() bool { return out.contains("q / Ctrl-C") })
-	terminalMouse(t, master, 0, 4, 15) // popup must block underlying task selection
+	terminalMouse(t, master, 0, 4, 16) // popup must block underlying task selection
 	keys(t, master, "?")
 	out.clear()
 	keys(t, master, "S") // owner must still be alpha, not failure
@@ -80,9 +80,9 @@ tasks:
 	f.finished("alpha", running)
 	eventuallyIntegration(t, func() bool { return out.contains("stopped") })
 	out.clear()
-	terminalMouse(t, master, 0, 4, 14) // first task row: success
+	terminalMouse(t, master, 0, 4, 15) // first task row: success
 	eventuallyIntegration(t, func() bool { return out.contains("success:") })
-	terminalMouse(t, master, 0, 33, 14) // task border must not select another row
+	terminalMouse(t, master, 0, 33, 15) // task border must not select another row
 	keys(t, master, "S")
 	var success model.Run
 	eventuallyIntegration(t, func() bool { success = findRun(f.state(), "success"); return success.Lifecycle == model.Exited })

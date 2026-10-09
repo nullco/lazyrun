@@ -26,8 +26,9 @@ Run plain `lazyrun` in a terminal; use `--state` when piping output or scripting
 A useful dashboard requires at least 70x18 cells. Smaller sizes disable lifecycle
 keys but still allow `q` / Ctrl-C; resizing back preserves commands and selection.
 Press `?` for keys, `2`/`3` to select commands, and Enter to scroll their details.
-Errors appear as nonblocking notifications; the latest full notification is also
-in Details (scroll down). `!` next to a command means a run/metadata/log error.
+The footer only shows shortcuts or the `Filter:` input, not notifications or
+search-status messages. The latest action/error message and log-read warnings
+are in Details (scroll down). `!` next to a command means a run/metadata/log error.
 
 Logs soft-wrap to the pane width, including long lines. Up/Down, `j/k`, the
 mouse wheel and PgUp/PgDn scroll visual rows, not whole application lines.
@@ -39,7 +40,7 @@ missing disk bytes. The dashboard-buffer eviction banner means the independent
 Scroll past the loaded top to page in older retained output, or press `Home` to
 jump to the earliest retained bytes; `G` reloads and follows the live tail. Paging
 uses bounded windows rather than accumulating whole logs. Very long lines can
-span page fragments. A "beginning not retained" title/notification means rotation
+span page fragments. A "beginning not retained" title/message in Details means rotation
 or loss removed the original beginning; there is nothing earlier to load.
 
 Focus the selected command's **Logs pane** first (Enter or click inside Logs).

@@ -27,8 +27,11 @@ func TestGeometryKeepsSeparateAdjacentBordersWithoutBlankGaps(t *testing.T) {
 					t.Fatalf("%dx%d: unusable framed pane %s: %+v", width, height, name, r)
 				}
 			}
-			if project.y1-project.y0-1 != 3 || tasks.y1 != detail.y1 || detail.y1 != height-4 {
-				t.Fatalf("%dx%d: project/status/footer space changed: %+v", width, height, areas)
+			if project.y1-project.y0-1 != 3 || tasks.y1 != detail.y1 || detail.y1 != height-2 {
+				t.Fatalf("%dx%d: project/footer space changed: %+v", width, height, areas)
+			}
+			if areas["footer"].y0 != detail.y1 || areas["footer"].y1-areas["footer"].y0-1 != 1 || areas["footer"].y0+1 != height-1 {
+				t.Fatalf("%dx%d: panes must end directly above the single footer row: %+v", width, height, areas)
 			}
 		}
 	}

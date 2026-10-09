@@ -2,7 +2,6 @@ package gui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -34,7 +33,6 @@ type navigation struct {
 	searchDone               bool
 	matches                  []model.LogMatch
 	matchIndex               int
-	searchOffset             uint64
 }
 type wrapTarget struct {
 	anchor uint64
@@ -82,7 +80,6 @@ func (d *dashboard) clearSearch() {
 	d.matchIndex = -1
 	d.searchResume = nil
 	d.searchDone = false
-	d.searchOffset = 0
 }
 func (d *dashboard) resetNavigation() {
 	d.clearSearch()
@@ -360,9 +357,6 @@ func (d *dashboard) consumeSearch(e event) {
 	if r.RunID != d.logRun {
 		return
 	}
-	if r.State != nil {
-		d.searchOffset = r.State.Offset
-	}
 	if r.Error != "" {
 		d.logError = singleLine(r.Error)
 	}
@@ -436,18 +430,6 @@ func (d *dashboard) nextMatch(delta int) {
 		before, cutoff := current.End, current.Cursor
 		d.requestSearch(model.LogSearchRequest{Query: d.searchQuery, Before: &before, MatchBefore: &cutoff, Last: true})
 	}
-}
-func (d *dashboard) searchStatus() string {
-	if d.searchQuery == "" {
-		return ""
-	}
-	if d.searchBusy {
-		return fmt.Sprintf("searching retained logs… (cursor %d) — Esc cancels", d.searchOffset)
-	}
-	if d.matchIndex >= 0 {
-		return fmt.Sprintf("search %q — n/N next/previous, Esc clears", d.searchQuery)
-	}
-	return "no retained matches — / new search, Esc clears"
 }
 
 // Search overlays fixed styles without sacrificing the application colors that

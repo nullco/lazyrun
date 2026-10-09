@@ -110,6 +110,13 @@ func TestRenderedThemeTracksFocusSelectionAndHelp(t *testing.T) {
 		if step > 0 {
 			frame := frames[step-1]
 			areas := geometry(100, 30)
+			for x, want := range []rune(d.footerHints(100)) {
+				got, _, _, _ := gocui.Screen.GetContent(x, 29)
+				if got != want {
+					t.Fatalf("footer cell %d: %q != %q", x, got, want)
+				}
+				checkCell(x, 29, footerColor, gocui.ColorDefault)
+			}
 			if frame.help {
 				checkRoundedCorners(rectangle{2, 1, 97, 28})
 				checkCell(2, 3, g.SelFrameColor, gocui.ColorDefault)

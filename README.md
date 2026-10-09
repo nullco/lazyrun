@@ -75,11 +75,13 @@ manageable in their original pane. Details distinguish the run snapshot from
 changed configuration, show actual outcomes and errors, and never show inherited
 environments. Reopen to synchronize config edits; there is no file watcher.
 Lifecycle requests are asynchronous and never implicitly retried or queued by
-repeated keypresses. Notifications do not block navigation; the latest is also
-readable in Details. Minimum dashboard size is 70 columns by 18 rows. Keyboard
-and mouse navigation are supported. Panes use rounded borders with no extra
+repeated keypresses. The latest action/error message and log-read warnings are
+available in Details; no notification/search-status row is reserved. Minimum
+dashboard size is 70 columns by 18 rows. Keyboard and mouse navigation are supported. Panes use rounded borders with no extra
 blank rows/columns between them. A green border/title marks the focused pane;
-its selected command has a full-width blue highlight.
+its selected command has a full-width blue highlight. A single blue footer row
+shows comma-separated `key: action` hints for the focused pane; secondary hints
+appear only when they fit, with `q: quit` and `?: help` kept visible.
 Statuses use green for running/completed, yellow for transitions/stops, red for
 failures/warnings, and cyan for naturally exited services. Text labels and the
 `>` selection marker remain visible independently of color.

@@ -259,8 +259,19 @@ focused command list uses a cursor-aligned, full-width white-on-blue selection;
 unfocused lists keep the `>` marker and original status colors. Lifecycle/outcome
 colors never replace their textual labels or change process state. Metadata is
 sanitized before adding fixed SGR styles; application log colors stay independent.
-Rendered tcell simulation tests cover focus transfer, selection, help, and log
-color preservation, in addition to geometry/scrolling and real-terminal tests.
+The borderless shortcut footer is one blue row of comma-separated `key: action`
+hints, contextual to the focused pane. Primary actions and quit/help fit at the
+minimum width; secondary hints appear only in full when space permits. It never
+advertises log search in other panes, or disabled lifecycle actions while
+disconnected. No notification row is reserved, and notifications/search-status
+messages never replace shortcuts. Pane borders end directly above this final
+row. Latest action/error messages and log-read warnings remain accessible in
+Details; connection and run/metadata/log errors retain their pane indicators.
+Editing replaces shortcuts with the existing generic `Filter:` input. All
+previously reserved status/extra-footer space goes to the panes.
+Rendered tcell simulation tests cover focus transfer, selection, help, footer
+text/color and log preservation, in addition to geometry/scrolling and
+real-terminal tests.
 
 Mouse reporting is enabled through the same gocui/tcell backend. Left click only
 focuses a pane/selects a displayed command; lifecycle operations stay on explicit

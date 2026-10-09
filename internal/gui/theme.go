@@ -14,6 +14,8 @@ const (
 	styleCyan   = "\x1b[36m"
 )
 
+var footerColor = gocui.NewRGBColor(128, 170, 255)
+
 func configureTheme(g *gocui.Gui) {
 	// SelFrameColor is ignored unless GUI-level highlighting is enabled.
 	g.Highlight = true

@@ -3,7 +3,6 @@ package gui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jesseduffield/gocui"
 	"github.com/mattn/go-runewidth"
@@ -22,7 +21,7 @@ func geometry(width, height int) map[string]rectangle {
 		return nil
 	}
 	left := max(24, min(42, width/3))
-	bottom := height - 4 // one notification row and two footer rows
+	bottom := height - 2 // panes end directly above the single footer/input row
 	// Framed coordinates include their borders. Adjacent border cells keep
 	// each pane distinct without an extra blank row or column.
 	const separation = 1
@@ -30,12 +29,11 @@ func geometry(width, height int) map[string]rectangle {
 	servicesStart := projectEnd + separation
 	servicesEnd := servicesStart + (bottom-servicesStart-separation)/2
 	return map[string]rectangle{
-		"project":      {0, 0, left, projectEnd},
-		"services":     {0, servicesStart, left, servicesEnd},
-		"tasks":        {0, servicesEnd + separation, left, bottom},
-		"detail":       {left + separation, 0, width - 1, bottom},
-		"notification": {-1, bottom, width, height - 2},
-		"footer":       {-1, height - 3, width, height},
+		"project":  {0, 0, left, projectEnd},
+		"services": {0, servicesStart, left, servicesEnd},
+		"tasks":    {0, servicesEnd + separation, left, bottom},
+		"detail":   {left + separation, 0, width - 1, bottom},
+		"footer":   {-1, bottom, width, height},
 	}
 }
 
@@ -86,7 +84,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		d.syncLogView()
 	}
 	if d.small {
-		for _, name := range []string{"project", "services", "tasks", "detail", "notification", "footer", "help", "search"} {
+		for _, name := range []string{"project", "services", "tasks", "detail", "footer", "help", "search"} {
 			_ = g.DeleteView(name)
 		}
 		v, err := view(g, "minimum", "", rectangle{-1, -1, max(1, width), max(1, height)}, false)
@@ -199,54 +197,13 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	} else {
 		d.showLogs(v, item)
 	}
-	v, err = view(g, "notification", "", areas["notification"], false)
-	if err != nil {
-		return err
-	}
-	text := ""
-	if d.windowBusy {
-		text = "Loading retained log page…"
-	} else if d.logPaneFocused() && d.searchQuery != "" {
-		text = d.searchStatus()
-	}
-	if !d.connected {
-		text = connection
-	} else if time.Now().Before(d.noticeUntil) {
-		if text != "" {
-			text = d.notice + " | " + text
-		} else {
-			text = d.notice
-		}
-	} else if d.logError != "" {
-		if text != "" {
-			text = "Log warning: " + d.logError + " | " + text
-		} else {
-			text = "Log warning: " + d.logError
-		}
-	}
-	v.FgColor = gocui.ColorYellow + 8
-	if !d.connected {
-		v.FgColor = gocui.ColorRed + 8
-	}
-	putLines(v, textLines(text), 0, 0)
 	v, err = view(g, "footer", "", areas["footer"], false)
 	if err != nil {
 		return err
 	}
-	v.FgColor = gocui.ColorCyan + 8
-	actions := "Select a service/task for actions"
-	if ok {
-		start, restart := "start", "restart"
-		if displayKind(item) == model.Task {
-			start, restart = "run", "rerun"
-		}
-		actions = "S " + start + " | s stop (SIGTERM only) | r " + restart
-		if item.Removed {
-			actions = "s stop (removed from config)"
-		}
-	}
+	v.FgColor = footerColor
 	if !d.searchEditing {
-		putLines(v, textLines("1 Project | 2 Services | 3 Tasks | Tab focus | ? help | q quit\n"+actions+" | Enter details | [ ] tabs | G follow"), 0, 0)
+		putLines(v, textLines(d.footerHints(width)), 0, 0)
 	}
 	if d.help {
 		v, err := view(g, "help", "Help - j/k scroll; Esc / ? closes", rectangle{2, 1, width - 3, height - 2}, true)
@@ -265,7 +222,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	if d.searchEditing {
 		// Shared footer presentation; the editor still belongs to the pane that
 		// opened it. Other pane filters can reuse this surface later.
-		v, err := view(g, "search", "", rectangle{-1, height - 2, width, height}, false)
+		v, err := view(g, "search", "", areas["footer"], false)
 		if err != nil {
 			return err
 		}
@@ -290,7 +247,10 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 }
 func (d *dashboard) showDetails(v *gocui.View, text string) {
 	if d.notice != "" {
-		text += "\n\nLast notification: " + d.notice
+		text += "\n\nLast message: " + d.notice
+	}
+	if d.owner != projectPane && d.logError != "" {
+		text += "\n\nLog warning: " + d.logError
 	}
 	lines := textLines(plain(text)) // all metadata fields, including historical run IDs
 	_, height := v.Size()

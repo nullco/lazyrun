@@ -113,7 +113,7 @@ func TestLogSearchUsesGenericFooterInputAndStatusIsLocal(t *testing.T) {
 				t.Fatal(err)
 			}
 			footer, _ := g.View("footer")
-			if _, err := g.View("search"); err == nil || g.Cursor || g.CurrentView().Name() != "detail" || !strings.Contains(footer.Buffer(), "Tab focus") {
+			if _, err := g.View("search"); err == nil || g.Cursor || g.CurrentView().Name() != "detail" || !strings.Contains(footer.Buffer(), "q: quit") {
 				t.Fatal("cancel did not restore the footer and owning pane", footer.Buffer())
 			}
 			d.searchQuery = "saved"
@@ -122,7 +122,7 @@ func TestLogSearchUsesGenericFooterInputAndStatusIsLocal(t *testing.T) {
 			if err := d.layout(g); err != nil {
 				t.Fatal(err)
 			}
-			v, _ := g.View("notification")
+			v, _ := g.View("footer")
 			if strings.Contains(v.Buffer(), "search") || strings.Contains(v.Buffer(), "n/N") {
 				t.Fatal("another pane advertised global log-search shortcuts", v.Buffer())
 			}

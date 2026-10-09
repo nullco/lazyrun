@@ -88,7 +88,6 @@ type dashboard struct {
 	small                      bool
 	busy                       bool
 	notice                     string
-	noticeUntil                time.Time
 	buffer                     logBuffer
 	logAlias, logRun           string
 	logError                   string
@@ -295,7 +294,6 @@ func (d *dashboard) drain() {
 }
 func (d *dashboard) notify(text string) {
 	d.notice = singleLine(text)
-	d.noticeUntil = time.Now().Add(10 * time.Second)
 }
 
 func displayKind(item model.CommandState) model.Kind {

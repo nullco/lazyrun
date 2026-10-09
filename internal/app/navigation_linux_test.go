@@ -167,7 +167,7 @@ func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	eventuallyIntegration(t, func() bool { return out.contains("long-match-suffix") })
 	out.clear()
 	keys(t, master, "/needle\r")
-	eventuallyIntegration(t, func() bool { return out.contains("search \"needle\"") && out.contains("EARLY") })
+	eventuallyIntegration(t, func() bool { return out.contains("n/N: jump") && out.contains("EARLY") })
 	out.clear()
 	// Log search/navigation must not capture list-pane keys. If / opened a
 	// global prompt, ? would become search text instead of opening Help; if G
@@ -176,7 +176,7 @@ func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	eventuallyIntegration(t, func() bool { return out.contains("Navigation") })
 	out.clear()
 	keys(t, master, "?\r")
-	eventuallyIntegration(t, func() bool { return out.contains("search \"needle\"") && out.contains("EARLY") })
+	eventuallyIntegration(t, func() bool { return out.contains("n/N: jump") && out.contains("EARLY") })
 	out.clear()
 	keys(t, master, "n")
 	eventuallyIntegration(t, func() bool { return out.contains("MIDDLE") })
