@@ -260,10 +260,11 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	if err != nil {
 		return err
 	}
+	v.Footer = plain(crop(d.notice, "", 0, max(0, v.InnerWidth()-4)))
 	if d.owner == projectPane {
 		d.showDetails(v, projectDetails(d.state, connection, d.opts.Version))
 	} else if !ok {
-		putLines(v, textLines("No command selected. Add commands to lazyrun.yml and reopen."), 0, 0)
+		putLines(v, textLines("No command selected. Add commands to lazyrun.yml and press R to reload."), 0, 0)
 	} else if d.tab == 1 {
 		text := commandDetails(item)
 		if !d.connected {

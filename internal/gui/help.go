@@ -64,6 +64,7 @@ func (d *dashboard) helpEntries() []helpEntry {
 	entries = append(entries, helpEntry{}, helpEntry{description: "Global"})
 	add("1 / 2 / 3", "Project / Services / Tasks")
 	add("<tab>/<s-tab>", "Next/previous pane")
+	add("R", "Reload config (running commands unchanged)")
 	if d.owner != projectPane {
 		add("[ / ]", "Switch Logs/Details")
 	}

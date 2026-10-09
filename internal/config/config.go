@@ -68,6 +68,19 @@ func LoadBytes(dir string) (model.Project, []byte, error) {
 	if err != nil {
 		return model.Project{}, nil, err
 	}
+	return LoadFileBytes(path)
+}
+
+// LoadFileBytes validates one exact configuration path without searching parents.
+// The returned bytes can be sent unchanged to the supervisor for synchronization.
+func LoadFileBytes(path string) (model.Project, []byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return model.Project{}, nil, fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return model.Project{}, nil, fmt.Errorf("%s must be a regular configuration file", path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return model.Project{}, nil, fmt.Errorf("open %s: %w", path, err)

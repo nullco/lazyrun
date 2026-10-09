@@ -34,7 +34,7 @@ func TestKeybindingsDescribeFocusedPaneAndGlobalControls(t *testing.T) {
 				descriptions = append(descriptions, entry.description)
 			}
 			text := strings.Join(descriptions, "\n")
-			for _, want := range append(append([]string{}, test.want...), "Local", "Global", "Quit (commands continue)", "Next/previous pane") {
+			for _, want := range append(append([]string{}, test.want...), "Local", "Global", "Quit (commands continue)", "Next/previous pane", "Reload config (running commands unchanged)") {
 				if !strings.Contains(text, want) {
 					t.Fatal("keybindings lost a local/global control", want, text)
 				}

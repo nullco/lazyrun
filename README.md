@@ -50,6 +50,9 @@ lazyrun
 ```
 
 Select a command, then press `S` to start/run, `s` to stop, or `r` to restart.
+Press `R` in any pane to reload `lazyrun.yml` without restarting commands.
+Changes apply to the next start/restart; invalid config leaves the last valid
+configuration in place. Removed running commands remain visible and stoppable.
 Use `Tab` to switch panes and `Enter` to focus Logs. `/` searches in focused
 Logs; `G` resumes following. Press `?` for pane-specific keybindings and `q` to
 quit without stopping commands. On small screens, inactive panes collapse to clickable

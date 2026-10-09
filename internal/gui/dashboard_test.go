@@ -18,9 +18,20 @@ type fakeClient struct {
 	env     []string
 	blocked chan struct{}
 	reads   chan string
+	synced  []byte
+	syncErr error
 }
 
 func (c *fakeClient) State(context.Context) (model.State, error) { return fixtureState(), nil }
+func (c *fakeClient) Sync(ctx context.Context, data []byte) error {
+	if _, err := c.mutation(ctx, "sync", "", nil); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.synced = append([]byte(nil), data...)
+	return c.syncErr
+}
 func (c *fakeClient) mutation(ctx context.Context, action, alias string, env []string) (model.Run, error) {
 	c.mu.Lock()
 	c.calls = append(c.calls, action+" "+alias)

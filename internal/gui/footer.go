@@ -54,6 +54,9 @@ func (d *dashboard) footerHints(width int) string {
 		primary = []string{"Tab: focus", "1/2/3: panes"}
 		secondary = []string{"Enter: details", "Shift-Tab: back"}
 	}
+	if !d.help && d.connected {
+		secondary = append([]string{"R: reload config"}, secondary...)
+	}
 	if width < wideWidth {
 		switch {
 		case d.logPaneFocused():

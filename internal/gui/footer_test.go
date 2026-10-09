@@ -96,6 +96,9 @@ func TestDetailsDisplaysLatestMessageAndLogWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail, _ := g.View("detail")
+	if detail.Footer != "An action failed" {
+		t.Fatal("latest message must be visible without scrolling", detail.Footer)
+	}
 	if !strings.Contains(detail.Buffer(), "Last message: An action failed") || !strings.Contains(detail.Buffer(), "Log warning: retention problem") {
 		t.Fatal("Details message/warning rendering changed", detail.Buffer())
 	}

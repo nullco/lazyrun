@@ -15,6 +15,7 @@ import (
 
 // Client is deliberately independent of the runtime and Unix transport.
 type Client interface {
+	Sync(context.Context, []byte) error
 	State(context.Context) (model.State, error)
 	Start(context.Context, string, []string) (model.Run, error)
 	Stop(context.Context, string) (model.Run, error)
@@ -41,6 +42,7 @@ const (
 var paneNames = []string{"project", "services", "tasks", "detail"}
 
 type event struct {
+	reload           bool
 	window           bool
 	anchor           uint64
 	delta            int
@@ -88,6 +90,7 @@ type dashboard struct {
 	help                       bool
 	small                      bool
 	busy                       bool
+	reloading                  bool
 	notice                     string
 	buffer                     logBuffer
 	logAlias, logRun           string
@@ -131,6 +134,7 @@ func Run(ctx context.Context, client Client, opts Options) error {
 	d := newDashboard(ctx, client, state, opts)
 	defer func() { d.cancel(); d.workers.Wait(); g.Close() }()
 	g.Cursor = false
+	g.ShowListFooter = true
 	g.SetManagerFunc(d.layout)
 	if err := d.bindings(g); err != nil {
 		return err
@@ -239,6 +243,13 @@ func (d *dashboard) drain() {
 		select {
 		case e := <-d.events:
 			switch {
+			case e.reload:
+				d.reloading = false
+				if e.err != nil {
+					d.notify("Config reload failed: " + e.err.Error())
+				} else {
+					d.notify("Config reloaded; running commands unchanged")
+				}
 			case e.action != "":
 				d.busy = false
 				if e.err != nil {
@@ -417,6 +428,10 @@ func (d *dashboard) action(action string) {
 		d.notify("Disconnected: actions disabled; reopen the dashboard if the supervisor was lost")
 		return
 	}
+	if d.reloading {
+		d.notify("Config reload pending; no lifecycle request was queued")
+		return
+	}
 	if d.busy {
 		d.notify("A lifecycle request is pending; no replacement was queued")
 		return
@@ -491,6 +506,7 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 		{gocui.KeyArrowLeft, func() { d.scrollHorizontal(-10) }}, {gocui.KeyArrowRight, func() { d.scrollHorizontal(10) }},
 		{'[', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }}, {']', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }},
 		{'S', func() { d.action("start") }}, {'s', func() { d.action("stop") }}, {'r', func() { d.action("restart") }},
+		{'R', d.reloadConfig},
 		{'G', d.goFollow}, {gocui.KeyHome, d.goHome},
 		{'/', d.openSearch}, {'n', func() { d.nextMatch(1) }}, {'N', func() { d.nextMatch(-1) }},
 		{gocui.KeyBackspace, func() {}}, {gocui.KeyBackspace2, func() {}},
@@ -593,7 +609,7 @@ func itemLabelWithStatus(item model.CommandState, status string) string {
 }
 func projectDetails(s model.State, connection, version string) string {
 	p := s.Project
-	return fmt.Sprintf("%s\n\nRoot: %s\nConfig: %s\nProject ID: %s\nShell: %s\nConnection: %s\nVersion: %s\n\n%d configured services, %d configured tasks\nLog retention: %d bytes per latest run\nInitial tail: %d lines; timestamps: %t\n\nOpening this dashboard starts nothing.\nSelect a service or task for Logs / Details.\nQuitting leaves commands running.\nNo project-wide lifecycle action or log stream.\nConfig is synchronized when opening/reopening.\nNo automatic restart or force-kill.", singleLine(p.Name), singleLine(p.Root), singleLine(p.ConfigPath), singleLine(p.ID), singleLine(p.Shell), singleLine(connection), singleLine(version), len(p.Services), len(p.Tasks), p.Logs.MaxBytes, p.Logs.Tail, p.Logs.Timestamps)
+	return fmt.Sprintf("%s\n\nRoot: %s\nConfig: %s\nProject ID: %s\nShell: %s\nConnection: %s\nVersion: %s\n\n%d configured services, %d configured tasks\nLog retention: %d bytes per latest run\nInitial tail: %d lines; timestamps: %t\n\nOpening this dashboard starts nothing.\nSelect a service or task for Logs / Details.\nQuitting leaves commands running.\nNo project-wide lifecycle action or log stream.\nConfig is synchronized on open or with R to reload.\nReload leaves running commands unchanged.\nNo automatic restart or force-kill.", singleLine(p.Name), singleLine(p.Root), singleLine(p.ConfigPath), singleLine(p.ID), singleLine(p.Shell), singleLine(connection), singleLine(version), len(p.Services), len(p.Tasks), p.Logs.MaxBytes, p.Logs.Tail, p.Logs.Timestamps)
 }
 func commandDetails(item model.CommandState) string {
 	r := item.Run
