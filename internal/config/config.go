@@ -15,7 +15,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 const (

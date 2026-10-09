@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jesseduffield/gocui"
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 // Client is deliberately independent of the runtime and Unix transport.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 func TestPostLaunchPersistenceFailureDoesNotLoseOwnershipOrCapture(t *testing.T) {

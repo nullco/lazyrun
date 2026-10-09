@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/nullco/lazyrun/internal/supervisor"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/supervisor"
 )
 
 func TestConcurrentBootstrapReplacesOnlyOneStaleSocketOwner(t *testing.T) {

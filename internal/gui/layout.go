@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jesseduffield/gocui"
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 const (

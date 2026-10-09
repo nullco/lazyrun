@@ -9,9 +9,9 @@ client-only dashboard.
 The headless CLI and TUI always go through the same supervisor path;
 there is no in-process execution shortcut with weaker lifetime guarantees.
 
-Go 1.25 is the initial supported toolchain; the development environment has
-1.25.3. Dependencies are pinned in `go.mod`/`go.sum`. The local module path is
-provisional until the repository's public identity is decided.
+Go 1.25 was the initial toolchain; M6 raises the minimum to patched Go 1.25.10.
+Dependencies are pinned in `go.mod`/`go.sum`. The configured GitHub origin settled
+the module/install identity as `github.com/nullco/lazyrun`.
 
 ## YAML: narrow substitution
 
@@ -255,3 +255,50 @@ that already-unlinked path as absent and re-probe under startup/ownership locks.
 Wrong owners/types/modes and multiple links remain errors; opened file capabilities
 still require exactly one link. Deterministic validation tests and repeated
 concurrent-bootstrap integration tests cover this distinction.
+
+## M6 release gates and real application findings
+
+The symbol-level `govulncheck` scan of the original Go 1.25.3 reported reachable
+standard-library findings (including conservative cross-platform reports). Raise
+the module minimum to Go 1.25.10 rather than suppressing findings; the patched
+symbol scan is clean. Keep the audit tool pinned and re-run it against the live
+vulnerability database before releasing. Uncalled package/module findings are
+reported separately and are not represented as reachable exploits.
+
+Changing the provisional module path to the configured `github.com/nullco/lazyrun`
+origin changes import/install identity, not project IDs, state namespaces or wire
+compatibility. Display version comes from a release linker override, the module
+version for `go install @tag`, or source VCS revision/dirty metadata. Protocol 2
+remains the compatibility authority. Static CGO-disabled Linux amd64/arm64
+packages use trimmed paths, disabled build VCS data, normalized archives and
+checksums, retaining Go/dependency license and NOTICE texts. An explicit source
+allowlist excludes local venvs/brokers/artifacts.
+Publication/tagging/licensing and native arm64 validation remain deliberate owner
+steps, not side effects of packaging or CI.
+
+Opt-in smoke tests use pinned Python 3.12 packages, the real Werkzeug stat
+reloader, and real Celery prefork/threads workers with Kombu filesystem transport.
+No Redis, root privileges, mock reloader, monkey-patched pool signal handler or
+production broker is required. Verify HTTP across reconnect/reload/restart, all
+ordinary group descendants after stop, task publication/execution, final logs,
+and canceled replacements after the bounded restart wait. The idle-stop gate
+uses real Celery `inspect active` acknowledgement: a child's done file precedes
+parent-side result collection and was insufficient under concurrent stress.
+
+The smoke exposed an important limit: process-group SIGTERM also reaches default
+Celery prefork children. With the tested versions they exit on SIGTERM and can
+abort a task even while the parent announces `Warm shutdown`; parent handling of
+child loss can exceed three seconds. Do not hide this by silently switching to
+parent-only signaling. Tests cover idle prefork shutdown, busy prefork child loss,
+and busy threads-pool warm completion with a canceled restart. Framework-internal
+signals/shutdown behavior are not lazyrun force-kill, and the worker's shell
+outcome is not a promise that every Celery job succeeded.
+
+Final rendering stress found that zero-width combining marks could bypass a
+column-only viewport limit (gocui stores cells per rune). Bound normal combining
+clusters to four marks per visible base, and emit canonical styles only when a
+visible rune is emitted; pure style floods cannot grow the cell array. Human
+CLI diagnostics/`--check` escape control and bidi characters, while raw logs and
+JSON retain their original bytes. Empty/repeated alias/run-ID flags now fail
+before any supervisor connection rather than silently falling back to the
+interactive default or choosing the last value.

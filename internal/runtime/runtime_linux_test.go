@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"lazyrun/internal/model"
-	"lazyrun/internal/testutil"
+	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/testutil"
 )
 
 func TestProcessFixture(t *testing.T) { testutil.RunFixture() }

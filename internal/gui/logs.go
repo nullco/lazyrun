@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 const (
@@ -172,33 +172,47 @@ func crop(text, prefix string, offset, width int) string {
 	var out strings.Builder
 	column := 0
 	started := false
+	combining := 0
+	lastStyle := ""
+	writeStyle := func() {
+		sequence := current.sequence()
+		if !started || sequence != lastStyle {
+			out.WriteString(sequence)
+			lastStyle = sequence
+		}
+		started = true
+	}
 	for len(text) > 0 {
 		if strings.HasPrefix(text, "\x1b[") {
 			i := strings.IndexByte(text, 'm')
 			current.apply(text[2:i])
-			if started {
-				out.WriteString(text[:i+1])
-			}
+			// Canonicalize styling only when a visible rune is emitted. A run
+			// of millions of color changes must not enter the view buffer.
 			text = text[i+1:]
 			continue
 		}
 		r, n := utf8.DecodeRuneInString(text)
 		text = text[n:]
 		w := runewidth.RuneWidth(r)
+		if w == 0 {
+			// gocui stores a cell per rune, including zero-width marks. Keep
+			// normal combining accents, but cap pathological mark clusters.
+			if started && column > offset && combining < 4 {
+				writeStyle()
+				out.WriteRune(r)
+				combining++
+			}
+			continue
+		}
+		combining = 0
 		if column+w > offset+width {
 			break
 		}
 		if column >= offset {
-			if !started {
-				out.WriteString(current.sequence())
-				started = true
-			}
+			writeStyle()
 			out.WriteRune(r)
 		} else if column+w > offset { // clipped left half of a wide character
-			if !started {
-				out.WriteString(current.sequence())
-				started = true
-			}
+			writeStyle()
 			out.WriteString(strings.Repeat(" ", column+w-offset))
 		}
 		column += w

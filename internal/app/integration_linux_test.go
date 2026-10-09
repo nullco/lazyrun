@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/runtime"
+	"github.com/nullco/lazyrun/internal/supervisor"
+	"github.com/nullco/lazyrun/internal/transport"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/model"
-	"lazyrun/internal/runtime"
-	"lazyrun/internal/supervisor"
-	"lazyrun/internal/transport"
 )
 
 var testExecutable string

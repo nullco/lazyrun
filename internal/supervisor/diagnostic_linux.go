@@ -7,9 +7,9 @@ import (
 	"os"
 	"sync"
 
+	"github.com/nullco/lazyrun/internal/securefs"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/securefs"
 )
 
 const diagnosticLimit = 1024 * 1024

@@ -12,7 +12,7 @@ import (
 	"net"
 	"time"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 type Client struct{ Endpoint, ProjectID string }

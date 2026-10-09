@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/nullco/lazyrun/internal/model"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/model"
 )
 
 // ReconcileRecorded only observes. It never terminates/reaps/adopts a recorded

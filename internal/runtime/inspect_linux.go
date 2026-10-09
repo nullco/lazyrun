@@ -3,7 +3,7 @@
 package runtime
 
 import (
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 	"os"
 	"strings"
 )

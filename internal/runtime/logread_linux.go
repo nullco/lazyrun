@@ -3,8 +3,8 @@
 package runtime
 
 import (
-	"lazyrun/internal/logstore"
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/logstore"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 func (m *Manager) ReadOutput(alias, runID string, after uint64, limit int) (model.LogRead, error) {

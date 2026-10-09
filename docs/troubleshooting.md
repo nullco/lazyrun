@@ -1,5 +1,13 @@
 # Troubleshooting supervision
 
+## Install / version
+
+Use Linux and Go 1.25.10 or a newer patched toolchain. For a local checkout use
+`make build` or `go install ./cmd/lazyrun`; the public install path is
+`github.com/nullco/lazyrun/cmd/lazyrun` after the reviewed source/tag is published.
+`--version` identifies the client binary, not an upgrade of a live supervisor.
+Use [the release checklist](release.md) for static packages and checksums.
+
 ## First checks
 
 Run `lazyrun --check` from the project (or a subdirectory). This validates config
@@ -65,6 +73,13 @@ Stop only sends SIGTERM to the owned process group. A command ignoring SIGTERM
 remains `stopping`; no automatic SIGKILL follows. Restart waits three seconds by
 default, then cancels its replacement. It does not queue a start for later.
 Ordinary descendants can keep a group alive after its shell exits.
+
+Celery-specific caution: group-wide SIGTERM reaches default prefork children and
+can interrupt jobs despite a parent `Warm shutdown` message. Handling child loss
+may exceed the restart wait; a blocked replacement is canceled, not delayed.
+The threads smoke demonstrates warm in-process task completion, not a universal
+pool guarantee. Verify your exact worker/pool/tasks; see
+[the real Flask/Celery smoke findings](../examples/smoke/README.md).
 
 Inspect the command's shutdown behavior. Manual intervention outside lazyrun is
 your choice and requires verifying the current process/group identity. An old

@@ -4,7 +4,7 @@ package transport
 import (
 	"encoding/json"
 	"fmt"
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 const ProtocolVersion = 2

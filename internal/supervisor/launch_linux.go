@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/transport"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/model"
-	"lazyrun/internal/transport"
 )
 
 const InternalMode = "--internal-supervisor"

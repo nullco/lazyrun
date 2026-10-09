@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"lazyrun/internal/supervisor"
+	"github.com/nullco/lazyrun/internal/supervisor"
 )
 
 func TestChangedRuntimeDirectoryCannotCreateSecondStateOwner(t *testing.T) {

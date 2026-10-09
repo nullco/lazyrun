@@ -13,8 +13,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/nullco/lazyrun/internal/model"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/model"
 )
 
 // Restore rebuilds a bounded index once at supervisor startup. Reconnecting

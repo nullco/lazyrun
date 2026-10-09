@@ -104,5 +104,11 @@ func FuzzSanitizer(f *testing.F) {
 		out.WriteString(s.Finish())
 		checkSafe(t, out.String())
 		checkSafe(t, plain(string(input)))
+		width := int(size%80) + 1
+		visible := crop(out.String(), "", chunk, width)
+		checkSafe(t, visible)
+		if utf8.RuneCountInString(plain(visible)) > width*5 {
+			t.Fatal("unbounded viewport cell count")
+		}
 	})
 }

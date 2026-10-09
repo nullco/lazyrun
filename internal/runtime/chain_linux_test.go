@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 func TestRapidOrphanChainCannotDisappearBetweenScans(t *testing.T) {

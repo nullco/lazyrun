@@ -1,6 +1,6 @@
-module lazyrun
+module github.com/nullco/lazyrun
 
-go 1.25.0
+go 1.25.10
 
 require (
 	github.com/integrii/flaggy v1.8.0

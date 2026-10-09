@@ -1,8 +1,9 @@
 # lazyrun
 
 A Linux-first, keyboard-driven Go TUI for a project's named services and tasks.
-**Implementation in progress: the dashboard, detached supervision, bounded disk
-logs, and headless client work; release hardening remains.**
+The dashboard, detached supervision, bounded disk logs, and headless client are
+implemented. Linux release gates and local binary packaging are available; public
+publication is a separate, deliberate step.
 
 ## Current status
 
@@ -18,17 +19,22 @@ logs, and headless client work; release hardening remains.**
   rotation gaps, and visible disk/queue failures without blocking pipe draining.
 - **M5:** Project/Services/Tasks dashboard, Logs/Details tabs, keyboard actions,
   help, resizing, pause/follow, bounded UI logs, and safe ANSI color rendering.
-- **Next: M6** hardens the release, including real Flask/Celery smoke tests.
+- **M6:** patched toolchain/vulnerability gate, real Flask reloader and Celery
+  prefork/threads smoke tests, release CI, static Linux packages/checksums, install
+  identity/version metadata, and final CLI/rendering hardening.
 
 Both the dashboard and headless CLI use the same detached supervisor.
 Opening either starts no configured command; explicit start/restart requests do.
 
 ## Build and validate configuration
 
-Requires Linux and Go 1.25 or later. No root privileges are needed.
+Requires Linux and Go 1.25.10 or a newer patched toolchain. No root privileges are
+needed. Native tests run on amd64; arm64 is cross-built (native validation pending).
 
 ```sh
-make build
+make build                     # static bin/lazyrun
+# Or install this checkout into GOBIN / $(go env GOPATH)/bin:
+go install ./cmd/lazyrun
 cd /path/to/project
 /path/to/lazyrun/bin/lazyrun --check
 ```
@@ -37,7 +43,9 @@ cd /path/to/project
 in configuration order. It executes nothing and does not launch a supervisor.
 Run `lazyrun` without action flags to open the dashboard. The client connects or
 auto-launches a supervisor and synchronizes configuration, but starts no commands.
-A terminal is required; scripts/pipes should use `--state` for JSON.
+A terminal is required; scripts/pipes should use `--state` for JSON. See
+[release/install instructions](docs/release.md) for the public module path and
+verified Linux archive workflow.
 
 ### Dashboard workflow
 
@@ -66,6 +74,8 @@ eviction. Only visible rows/columns enter gocui's cell buffer. Normal validated
 ANSI colors/styles are preserved; clipboard/title/hyperlink, cursor/erase, bidi,
 and other controls are removed. Carriage returns become newlines (CRLF stays one
 newline), tabs become spaces, and invalid UTF-8 becomes replacement characters.
+Pathological combining-mark clusters are capped per visible cell; style-only
+floods are canonicalized rather than expanding the terminal cell buffer.
 Optional timestamps label captured chunks, not exact application emission times.
 
 ### Headless workflow
@@ -81,7 +91,9 @@ lazyrun --logs api --after 0     # oldest retained bytes
 lazyrun --logs api --run-id RUN_ID --after CURSOR
 ```
 
-Choose one action per invocation. Headless output is JSON except `--check`/help.
+Choose one action per invocation; alias/run-ID flags must be nonempty and occur
+only once. Invalid/ambiguous flags are rejected before supervisor connection.
+Headless output is JSON except `--check`/help; human diagnostics escape controls.
 Log responses include the run ID, `next` byte cursor, `truncated` flag, and
 capture-time `records` (each with its own byte cursor and timestamp). Reads carry
 at most 64 KiB of raw output. Initial reads use `logs.tail` (default 1,000 lines);
@@ -98,8 +110,10 @@ blindly retry a mutation. Metadata failures after launch return an error **and**
 the accepted run's identity. A blocked restart cancels its replacement, never
 launching later unexpectedly.
 
-The module name is provisionally `lazyrun`: no repository remote has been set.
-A public `go install` path will be chosen before release.
+The module is `github.com/nullco/lazyrun`. After publishing a reviewed commit/tag,
+install with `go install github.com/nullco/lazyrun/cmd/lazyrun@latest` (prefer a
+published tag for repeatable installs). No tag/public release is implied by this
+working tree. See [the release checklist](docs/release.md).
 
 ## Configuration
 
@@ -123,8 +137,9 @@ logs:
   maxBytes: 10485760
 ```
 
-See [`examples/flask/lazyrun.yml`](examples/flask/lazyrun.yml) for Flask/Celery.
-The example is configuration only: it does not install or bundle a Flask app.
+See [`examples/flask/lazyrun.yml`](examples/flask/lazyrun.yml) for a typical app
+configuration, or [the runnable real smoke project](examples/smoke/README.md) for
+an isolated Flask/Celery demonstration. lazyrun never installs Python packages.
 
 - Services/tasks may be omitted or written as `{}`; null/sequence sections fail.
 - Aliases must be unique across both collections and nonempty printable strings.
@@ -208,7 +223,10 @@ promises. After supervisor loss, potentially surviving runs become `unknown` and
 block start/stop/restart; recorded PIDs never grant signaling ownership. Available
 metadata is retained without fabricated exit codes. See
 [troubleshooting](docs/troubleshooting.md) before attempting manual cleanup.
-Real Flask reloader/Celery smoke tests remain release gates.
+Real Flask reloader/Celery shutdown tests are opt-in release gates. **Default
+Celery prefork tasks can be interrupted by process-group SIGTERM**, even when the
+parent reports warm shutdown; test your exact pool/task configuration. See the
+[smoke findings and setup](examples/smoke/README.md).
 
 ## Development
 
@@ -217,6 +235,12 @@ make test
 make race
 make vet
 make check              # formatting + vet + race tests
+make stress             # repeat lifecycle/IPC/security/log/PTY gates
+make fuzz               # terminal allowlist fuzzing
+make audit              # networked, pinned govulncheck
+# Set up an isolated venv as described in examples/smoke/README.md:
+LAZYRUN_SMOKE_PYTHON=/absolute/venv/bin/python make smoke
+make release VERSION=v0.1.0-rc.1  # local Linux amd64/arm64 packages; no publication
 ```
 
 Runtime fixtures use subprocesses; supervisor integration tests build the real
@@ -228,7 +252,9 @@ lines, invalid bytes, checksums/torn records, queue overload, ENOSPC/short write
 private paths, and bounded indexes. Dashboard tests cover navigation, async action
 limits, stale reads, sanitization/fuzz seeds, bounded viewports, and real PTY
 keyboard actions, resizing, quit/crash/hangup/signal, and reconnect. No Flask/Celery
-installation is required. Test cleanup may force-kill its verified fixtures;
-product Stop/Restart never escalates beyond SIGTERM.
+installation is required for the ordinary Go suite. Real Python smoke tests skip
+unless an interpreter is explicitly supplied; `make smoke` refuses a missing
+interpreter. Test cleanup may force-kill its verified fixtures; product
+Stop/Restart never escalates beyond SIGTERM.
 The Make targets disable Go's result cache (`-count=1`): subprocess builds can
 change even when the linked test runner itself has not changed.

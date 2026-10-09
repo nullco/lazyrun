@@ -10,12 +10,12 @@ import (
 	"net"
 	"os"
 
+	"github.com/nullco/lazyrun/internal/config"
+	"github.com/nullco/lazyrun/internal/logstore"
+	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/runtime"
+	"github.com/nullco/lazyrun/internal/transport"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/config"
-	"lazyrun/internal/logstore"
-	"lazyrun/internal/model"
-	"lazyrun/internal/runtime"
-	"lazyrun/internal/transport"
 )
 
 type startup struct {

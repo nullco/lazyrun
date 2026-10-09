@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"lazyrun/internal/model"
-	"lazyrun/internal/supervisor"
+	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/supervisor"
 )
 
 func TestSlowSocketClientDoesNotBlockCaptureOrIndependentAliases(t *testing.T) {

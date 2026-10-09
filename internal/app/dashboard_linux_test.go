@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nullco/lazyrun/internal/model"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/model"
 )
 
 // Keep draining a real terminal so rendering cannot be blocked by test readers.

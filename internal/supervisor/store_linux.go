@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"lazyrun/internal/model"
-	"lazyrun/internal/securefs"
+	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/securefs"
 )
 
 const metadataVersion = 1

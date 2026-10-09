@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 func TestSyncPreservesActiveSnapshotMovesAndRemovedRuns(t *testing.T) {

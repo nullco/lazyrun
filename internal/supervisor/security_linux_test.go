@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nullco/lazyrun/internal/config"
+	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/transport"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/config"
-	"lazyrun/internal/model"
-	"lazyrun/internal/transport"
 )
 
 func testPaths(t *testing.T) (model.Project, *Paths) {

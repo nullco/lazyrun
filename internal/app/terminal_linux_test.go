@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nullco/lazyrun/internal/model"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/model"
 )
 
 func terminalClient(t *testing.T, root string, args ...string) (*exec.Cmd, *os.File) {

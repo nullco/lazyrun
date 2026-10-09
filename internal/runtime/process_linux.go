@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 type procStat struct {

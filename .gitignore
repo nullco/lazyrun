@@ -1,2 +1,8 @@
 /bin/
 /coverage.out
+/dist/
+/examples/smoke/.venv/
+/examples/smoke/__pycache__/
+/examples/smoke/.smoke-broker/
+/examples/smoke/started-*.json
+/examples/smoke/done-*.json

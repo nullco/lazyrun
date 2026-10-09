@@ -4,8 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 func bufferText(b *logBuffer) string {
@@ -59,6 +60,23 @@ func TestLogBufferIndependentByteAndLineBounds(t *testing.T) {
 		t.Fatal("new run inherited buffer")
 	}
 }
+func TestViewportBoundsZeroWidthMarksAndStyleOnlyFloods(t *testing.T) {
+	for _, text := range []string{
+		strings.Repeat("\u0301", 100000),
+		"a" + strings.Repeat("\u0301", 100000),
+		"a" + strings.Repeat("\x1b[31m\x1b[32m", 100000) + "b",
+	} {
+		got := crop(text, "", 0, 20)
+		checkSafe(t, got)
+		if utf8.RuneCountInString(plain(got)) > 20*5 || len(got) > 20*128 {
+			t.Fatal("off-screen cells/styles leaked into viewport", len(got))
+		}
+	}
+	if got := plain(crop("e\u0301", "", 0, 20)); got != "e\u0301" {
+		t.Fatal("normal accent lost", got)
+	}
+}
+
 func TestViewportCroppingPreservesColorsAndWideCharacters(t *testing.T) {
 	for _, test := range []struct {
 		text, prefix  string

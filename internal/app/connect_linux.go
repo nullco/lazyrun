@@ -5,8 +5,8 @@ package app
 import (
 	"context"
 
-	"lazyrun/internal/config"
-	"lazyrun/internal/supervisor"
+	"github.com/nullco/lazyrun/internal/config"
+	"github.com/nullco/lazyrun/internal/supervisor"
 )
 
 // Connect validates before launching/synchronizing a supervisor. Opening a

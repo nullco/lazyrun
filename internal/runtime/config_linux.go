@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 func validateProject(p model.Project) error {

@@ -22,8 +22,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"lazyrun/internal/logstore"
-	"lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/logstore"
+	"github.com/nullco/lazyrun/internal/model"
 )
 
 var (

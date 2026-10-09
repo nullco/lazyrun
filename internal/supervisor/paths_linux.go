@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/nullco/lazyrun/internal/securefs"
 	"golang.org/x/sys/unix"
-	"lazyrun/internal/securefs"
 )
 
 const socketName = "control.sock"

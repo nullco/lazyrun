@@ -1,0 +1,13 @@
+version: 1
+name: flask-celery-smoke
+services:
+  api:
+    command: .venv/bin/python -u smoke_app.py serve
+  worker:
+    command: .venv/bin/python -m celery -A smoke_app.celery worker --pool=prefork --concurrency=2 --loglevel=INFO --without-gossip --without-mingle --without-heartbeat
+tasks:
+  enqueue:
+    command: .venv/bin/python -u smoke_app.py enqueue --seconds 5 --token manual
+logs:
+  tail: 200
+  maxBytes: 1048576
