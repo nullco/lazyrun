@@ -116,8 +116,6 @@ func Run(ctx context.Context, client Client, opts Options) error {
 	d := newDashboard(ctx, client, state, opts)
 	defer func() { d.cancel(); d.workers.Wait(); g.Close() }()
 	g.Cursor = false
-	g.FrameColor = gocui.ColorDefault
-	g.SelFrameColor = gocui.ColorGreen
 	g.SetManagerFunc(d.layout)
 	if err := d.bindings(g); err != nil {
 		return err
@@ -496,7 +494,10 @@ func outcome(r model.Run) string {
 	return singleLine(text)
 }
 func itemLabel(item model.CommandState) string {
-	text := singleLine(item.Run.Definition.Alias) + "  " + outcome(item.Run)
+	return itemLabelWithStatus(item, outcome(item.Run))
+}
+func itemLabelWithStatus(item model.CommandState, status string) string {
+	text := singleLine(item.Run.Definition.Alias) + "  " + status
 	if item.Removed {
 		text += " [removed from config]"
 	} else if item.Definition != nil && item.Definition.Kind != item.Run.Definition.Kind && item.Run.Lifecycle.Active() {

@@ -22,13 +22,17 @@ func geometry(width, height int) map[string]rectangle {
 	}
 	left := max(24, min(42, width/3))
 	bottom := height - 4 // one notification row and two footer rows
-	projectEnd := 5
-	servicesEnd := projectEnd + (bottom-projectEnd)/2
+	// Framed coordinates include their borders: a two-cell separation leaves
+	// one blank row/column between panes rather than a shared border.
+	const separation = 2
+	projectEnd := 4 // three content rows: name, root, connection
+	servicesStart := projectEnd + separation
+	servicesEnd := servicesStart + (bottom-servicesStart-separation)/2
 	return map[string]rectangle{
 		"project":      {0, 0, left, projectEnd},
-		"services":     {0, projectEnd, left, servicesEnd},
-		"tasks":        {0, servicesEnd, left, bottom},
-		"detail":       {left, 0, width - 1, bottom},
+		"services":     {0, servicesStart, left, servicesEnd},
+		"tasks":        {0, servicesEnd + separation, left, bottom},
+		"detail":       {left + separation, 0, width - 1, bottom},
 		"notification": {-1, bottom, width, height - 2},
 		"footer":       {-1, height - 3, width, height},
 	}
@@ -44,6 +48,9 @@ func view(g *gocui.Gui, name, title string, r rectangle, frame bool) (*gocui.Vie
 	v.Title = title
 	v.Wrap = false
 	v.Autoscroll = false
+	v.Highlight = false
+	v.FgColor, v.BgColor = gocui.ColorDefault, gocui.ColorDefault
+	v.SelFgColor, v.SelBgColor = gocui.ColorWhite|gocui.AttrBold, gocui.ColorBlue
 	v.Clear()
 	_ = v.SetOrigin(0, 0)
 	return v, nil
@@ -66,6 +73,7 @@ func textLines(text string) []logLine {
 	return lines
 }
 func (d *dashboard) layout(g *gocui.Gui) error {
+	configureTheme(g)
 	width, height := g.Size()
 	areas := geometry(width, height)
 	wasSmall := d.small
@@ -94,7 +102,11 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	if err != nil {
 		return err
 	}
-	putLines(v, textLines(singleLine(d.state.Project.Name)+"\n"+singleLine(d.state.Project.Root)+"\n"+connection), 0, 0)
+	connectionStyle := styleGreen
+	if !d.connected {
+		connectionStyle = styleRed
+	}
+	putLines(v, textLines(coloredLabel(singleLine(d.state.Project.Name), "\x1b[1;36m")+"\n"+coloredLabel(singleLine(d.state.Project.Root), styleMuted)+"\n"+coloredLabel(connection, connectionStyle)), 0, 0)
 	for _, p := range []pane{servicesPane, tasksPane} {
 		name := paneNames[p]
 		title := fmt.Sprintf("%d %s", p+1, strings.ToUpper(name[:1])+name[1:])
@@ -104,6 +116,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		}
 		items := d.items(p)
 		if len(items) == 0 {
+			v.FgColor = gocui.ColorWhite | gocui.AttrDim
 			putLines(v, textLines("(no configured "+name+")"), 0, 0)
 			continue
 		}
@@ -115,14 +128,25 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 				selected = i
 				prefix = "> "
 			}
-			lines[i].text = prefix + itemLabel(item)
+			lines[i].text = prefix + coloredItemLabel(item)
 			if !d.connected {
-				lines[i].text += " [last known]"
+				lines[i].text = coloredLabel(prefix+itemLabel(item)+" [last known]", styleMuted)
 			}
 		}
 		_, h := v.Size()
 		top := max(0, selected-h+1)
 		putLines(v, lines, top, 0)
+		if d.focus == p && !d.help {
+			v.Highlight = true
+			if err := v.SetCursor(0, selected-top); err != nil {
+				return err
+			}
+			// SetHighlight overrides the status color on the selected cells for
+			// white-on-blue contrast; Highlight also fills the rest of the row.
+			if err := v.SetHighlight(selected-top, true); err != nil {
+				return err
+			}
+		}
 	}
 	item, ok := d.current()
 	title := "Project Details"
@@ -172,11 +196,16 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	} else if d.logError != "" {
 		text = "Log warning: " + d.logError
 	}
+	v.FgColor = gocui.ColorYellow + 8
+	if !d.connected {
+		v.FgColor = gocui.ColorRed + 8
+	}
 	putLines(v, textLines(text), 0, 0)
 	v, err = view(g, "footer", "", areas["footer"], false)
 	if err != nil {
 		return err
 	}
+	v.FgColor = gocui.ColorCyan + 8
 	actions := "Select a service/task for actions"
 	if ok {
 		start, restart := "start", "restart"
@@ -217,14 +246,17 @@ func (d *dashboard) showDetails(v *gocui.View, text string) {
 }
 func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
 	if item.Run.ID == "" {
+		v.FgColor = gocui.ColorWhite | gocui.AttrDim
 		putLines(v, textLines("Not started. Press S to start/run this command."), 0, 0)
 		return
 	}
 	if d.unavailable {
+		v.FgColor = gocui.ColorYellow + 8
 		putLines(v, textLines("Logs unavailable for this run.\n"+d.logError), 0, 0)
 		return
 	}
 	if !d.loaded {
+		v.FgColor = gocui.ColorWhite | gocui.AttrDim
 		putLines(v, textLines("Loading latest-run logs...\n"+d.logError), 0, 0)
 		return
 	}
@@ -235,7 +267,7 @@ func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
 	}
 	_, height := v.Size()
 	if d.buffer.evicted {
-		fmt.Fprint(v, crop("[older output discarded from dashboard buffer]", "", 0, v.InnerWidth()), "\n")
+		fmt.Fprint(v, crop(coloredLabel("[older output discarded from dashboard buffer]", styleYellow), "", 0, v.InnerWidth()), "\n")
 		height--
 	}
 	bottom := max(0, len(lines)-height)

@@ -202,6 +202,16 @@ Its tcell backend supports simulation tests and true-color cells. The layout,
 controller and filter are original code; no lazydocker implementation was copied.
 No Docker/lazycore dependencies were added.
 
+Visual feedback adds one empty row between the stacked panes and one empty column
+before Logs/Details, without raising the 70×18 minimum. Enable gocui's GUI-level
+`Highlight` (required for `SelFrameColor`) for a green focused frame/title. The
+focused command list uses a cursor-aligned, full-width white-on-blue selection;
+unfocused lists keep the `>` marker and original status colors. Lifecycle/outcome
+colors never replace their textual labels or change process state. Metadata is
+sanitized before adding fixed SGR styles; application log colors stay independent.
+Rendered tcell simulation tests cover focus transfer, selection, help, and log
+color preservation, in addition to geometry/scrolling and real-terminal tests.
+
 The GUI depends on a narrow client interface, never runtime/exec/signal APIs.
 The default CLI requires terminal stdin/stdout before connecting; explicit flags
 remain headless. Poll state every 400 ms and selected logs every 200 ms, with
