@@ -57,6 +57,19 @@ func (c *fakeClient) Logs(ctx context.Context, a, r string, after uint64, limit 
 func (c *fakeClient) TailLogs(ctx context.Context, a, r string, tail, limit int) (model.LogRead, error) {
 	return c.Logs(ctx, a, r, 0, limit)
 }
+func (c *fakeClient) WindowLogs(ctx context.Context, a, r string, anchor uint64, before, limit int) (model.LogRead, error) {
+	return c.Logs(ctx, a, r, anchor, limit)
+}
+func (c *fakeClient) SearchLogs(ctx context.Context, a, r string, request model.LogSearchRequest) (model.LogSearchResult, error) {
+	if c.reads != nil {
+		select {
+		case c.reads <- a:
+		case <-ctx.Done():
+		}
+	}
+	<-ctx.Done()
+	return model.LogSearchResult{}, ctx.Err()
+}
 func fixtureState() model.State {
 	p := model.Project{Name: "demo", Root: "/demo", Logs: model.DefaultLogSettings()}
 	p.Services = []model.Definition{{Alias: "api", Kind: model.Service, Command: "echo api", Cwd: "/demo"}, {Alias: "worker", Kind: model.Service}}

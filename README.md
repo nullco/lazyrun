@@ -54,10 +54,15 @@ verified Linux archive workflow.
 - `[` / `]`: Logs / Details. Project selection shows only project details.
 - `S`: start service / run task; `s`: SIGTERM stop; `r`: restart / rerun.
 - In focused logs, `j/k`, arrows, or `PgUp/PgDn` scroll and pause following;
-  `G` resumes. Left/Right scroll sideways through long lines.
+  `G` resumes. Older output pages in as you reach the top; `Home` jumps to the
+  earliest retained output. Left/Right scroll sideways through long lines.
 - Left click: focus a pane; select a command row. Clicking never starts/stops it.
 - Mouse wheel: navigate the hovered list or scroll Logs/Details/Help; log scrolling
   pauses following (`G` resumes).
+- `/`: enter a literal, case-sensitive search of **all retained output for the
+  selected run**, not just the loaded tail. Enter searches; `n` / `N` jump to
+  next / previous matches. Esc clears/cancels; `G` exits search and follows.
+  In the search prompt, Esc / Ctrl-C cancels and lifecycle/quit letters are text.
 - `?`: contextual help; `q` / `Ctrl-C`: quit the dashboard, **not commands**.
 
 Commands retain their configured order. Active removed/moved aliases remain
@@ -74,8 +79,9 @@ failures/warnings, and cyan for naturally exited services. Text labels and the
 `>` selection marker remain visible independently of color.
 
 Logs start at `logs.tail`, continue by run-scoped cursors, and keep collecting
-while paused. Switching alias/run replaces the view buffer; switching tabs
-cancels only local reads. UI retention is independently capped at 10,000 logical
+while normally paused. Paging/search jumps enter a bounded historical window;
+`G` reloads the live tail. Supervisor capture never pauses. Switching alias/run
+replaces the view buffer; switching tabs cancels only local reads. UI retention is independently capped at 10,000 logical
 lines and 2 MiB of sanitized text; explicit markers identify disk gaps and UI
 eviction. Only visible rows/columns enter gocui's cell buffer. Normal validated
 ANSI colors/styles are preserved; clipboard/title/hyperlink, cursor/erase, bidi,
@@ -84,6 +90,18 @@ newline), tabs become spaces, and invalid UTF-8 becomes replacement characters.
 Pathological combining-mark clusters are capped per visible cell; style-only
 floods are canonicalized rather than expanding the terminal cell buffer.
 Optional timestamps label captured chunks, not exact application emission times.
+Search ignores terminal styling/control strings and display timestamps. It is
+asynchronous, resumable and memory-bounded (256 KiB scanned per request, at most
+64 matches per response); it does not transfer entire logs into the dashboard.
+Historical pages are 8 KiB, including fragments of very long lines. Rotation,
+record-index limits, and dropped output can remove the original beginning;
+`Home` then shows the earliest available bytes with a warning. Older runs are
+not archived.
+
+Paging/search require protocol **3**. Existing protocol-2 supervisors are not
+replaced automatically: use the older binary to stop their commands, verify they
+have finished, then identify and deliberately stop the idle supervisor before
+reopening with the new binary. See [compatibility](docs/troubleshooting.md#private-paths-and-compatibility).
 
 ### Headless workflow
 

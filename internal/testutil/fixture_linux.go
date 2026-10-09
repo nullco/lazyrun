@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // FixtureCommand runs the current Go test binary, relying on the caller's
@@ -97,6 +98,27 @@ func RunFixture() {
 		fmt.Fprintf(os.Stdout, "ready:%d\n", os.Getpid())
 		<-ch
 		fmt.Fprint(os.Stdout, "chain-final\n")
+	case "paged":
+		for block := range 80 {
+			var text strings.Builder
+			for row := range 200 {
+				number := block*200 + row
+				switch number {
+				case 0:
+					text.WriteString("EARLY needle\n")
+				case 7500:
+					text.WriteString(strings.Repeat("long-prefix ", 90) + "MATCHTARGET long-match-suffix\n")
+				case 8000:
+					text.WriteString("MIDDLE needle\n")
+				case 15999:
+					text.WriteString("LATE needle\n")
+				default:
+					fmt.Fprintf(&text, "row-%05d %s\n", number, strings.Repeat("x", 64))
+				}
+			}
+			fmt.Fprint(os.Stdout, text.String())
+			time.Sleep(10 * time.Millisecond)
+		}
 	case "volume":
 		_, _ = os.Stdout.Write([]byte(strings.Repeat("x", 4*1024*1024)))
 		fmt.Fprint(os.Stdout, "END")

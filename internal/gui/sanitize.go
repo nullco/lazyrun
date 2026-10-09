@@ -20,10 +20,20 @@ type Sanitizer struct {
 
 func (s *Sanitizer) Reset() { *s = Sanitizer{} }
 
+type lineBreak struct{ next uint64 }
+
 func (s *Sanitizer) Feed(data []byte) string {
+	text, _ := s.feedAt(data, 0, false)
+	return text
+}
+func (s *Sanitizer) feedAt(data []byte, cursor uint64, track bool) (string, []lineBreak) {
+	if track && uint64(len(s.pending)) <= cursor {
+		cursor -= uint64(len(s.pending))
+	}
 	data = append(s.pending, data...)
 	s.pending = nil
 	var out strings.Builder
+	var breaks []lineBreak
 	for len(data) > 0 {
 		if !utf8.FullRune(data) {
 			s.pending = append([]byte(nil), data...)
@@ -31,9 +41,14 @@ func (s *Sanitizer) Feed(data []byte) string {
 		}
 		r, n := utf8.DecodeRune(data)
 		data = data[n:]
+		cursor += uint64(n)
+		before := out.Len()
 		s.rune(r, &out)
+		if track && (r == '\n' || r == '\r') && out.Len() > before {
+			breaks = append(breaks, lineBreak{next: cursor})
+		}
 	}
-	return out.String()
+	return out.String(), breaks
 }
 
 func (s *Sanitizer) Finish() string {

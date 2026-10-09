@@ -30,10 +30,12 @@ smoke:
 
 stress:
 	go test -race -count=10 -timeout=10m ./internal/runtime ./internal/logstore ./internal/securefs ./internal/supervisor ./internal/transport
-	go test -race -count=10 -timeout=10m ./internal/app -run 'Test(ConcurrentBootstrap|SupervisorReconnect|DiskLogs|ConcurrentBoundedReaders|Dashboard)'
+	go test -race -count=10 -timeout=10m ./internal/app -run 'Test(ConcurrentBootstrap|SupervisorReconnect|DiskLogs|LogNavigation|ConcurrentBoundedReaders|Dashboard)'
 
 fuzz:
 	go test ./internal/gui -run '^$$' -fuzz '^FuzzSanitizer$$' -fuzztime=30s -parallel=4
+	go test ./internal/gui -run '^$$' -fuzz '^FuzzSearchAgreesWithTerminalSanitizer$$' -fuzztime=30s -parallel=4
+	go test ./internal/logsearch -run '^$$' -fuzz '^FuzzSearchContinuations$$' -fuzztime=30s -parallel=4
 
 # Networked, pinned tooling; not part of the offline-capable default test suite.
 audit:

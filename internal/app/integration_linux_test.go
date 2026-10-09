@@ -18,6 +18,7 @@ import (
 	"github.com/nullco/lazyrun/internal/model"
 	"github.com/nullco/lazyrun/internal/runtime"
 	"github.com/nullco/lazyrun/internal/supervisor"
+	"github.com/nullco/lazyrun/internal/testutil"
 	"github.com/nullco/lazyrun/internal/transport"
 	"golang.org/x/sys/unix"
 )
@@ -25,6 +26,7 @@ import (
 var testExecutable string
 
 func TestMain(m *testing.M) {
+	testutil.RunFixture()
 	dir, err := os.MkdirTemp("", "lazyrun-integration-")
 	if err != nil {
 		panic(err)

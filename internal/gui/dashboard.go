@@ -21,6 +21,8 @@ type Client interface {
 	Restart(context.Context, string, []string) (model.Run, error)
 	Logs(context.Context, string, string, uint64, int) (model.LogRead, error)
 	TailLogs(context.Context, string, string, int, int) (model.LogRead, error)
+	WindowLogs(context.Context, string, string, uint64, int, int) (model.LogRead, error)
+	SearchLogs(context.Context, string, string, model.LogSearchRequest) (model.LogSearchResult, error)
 }
 
 type Options struct {
@@ -39,16 +41,25 @@ const (
 var paneNames = []string{"project", "services", "tasks", "detail"}
 
 type event struct {
-	state      *model.State
-	read       *model.LogRead
-	err        error
-	generation uint64
-	initial    bool
-	after      uint64
-	action     string
-	alias      string
+	window           bool
+	anchor           uint64
+	delta            int
+	search           *model.LogSearchResult
+	searchGeneration uint64
+	searchLast       bool
+	state            *model.State
+	read             *model.LogRead
+	err              error
+	generation       uint64
+	initial          bool
+	after            uint64
+	action           string
+	alias            string
 }
 type logJob struct {
+	window       bool
+	before       int
+	delta        int
 	ctx          context.Context
 	generation   uint64
 	alias, runID string
@@ -58,6 +69,7 @@ type logJob struct {
 }
 
 type dashboard struct {
+	navigation
 	client                     Client
 	opts                       Options
 	ctx                        context.Context
@@ -95,7 +107,8 @@ func newDashboard(ctx context.Context, client Client, state model.State, opts Op
 	ctx, cancel := context.WithCancel(ctx)
 	d := &dashboard{client: client, opts: opts, ctx: ctx, cancel: cancel,
 		events: make(chan event, 16), jobs: make(chan logJob, 1), state: state,
-		connected: true, focus: projectPane, owner: projectPane, follow: true}
+		navigation: navigation{searchJobs: make(chan searchJob, 1), matchIndex: -1},
+		connected:  true, focus: projectPane, owner: projectPane, follow: true}
 	d.opts.Environment = append([]string(nil), opts.Environment...)
 	d.reselect()
 	return d
@@ -123,6 +136,7 @@ func Run(ctx context.Context, client Client, opts Options) error {
 	}
 	d.spawn(d.pollState)
 	d.spawn(d.pollLogs)
+	d.spawn(d.pollSearch)
 	// Exactly one outstanding UI wakeup, with an acknowledgement. gocui's
 	// Update otherwise creates a goroutine per call and cannot cancel its queue.
 	d.spawn(func() {
@@ -194,13 +208,18 @@ func (d *dashboard) pollLogs() {
 				ctx, cancel := context.WithTimeout(job.ctx, 2*time.Second)
 				var r model.LogRead
 				var err error
-				if job.initial {
+				if job.window {
+					r, err = d.client.WindowLogs(ctx, job.alias, job.runID, job.after, job.before, windowBytes)
+				} else if job.initial {
 					r, err = d.client.TailLogs(ctx, job.alias, job.runID, job.tail, 64*1024)
 				} else {
 					r, err = d.client.Logs(ctx, job.alias, job.runID, job.after, 64*1024)
 				}
 				cancel()
-				if !d.send(job.ctx, event{read: &r, err: err, generation: job.generation, initial: job.initial, after: job.after}) {
+				if !d.send(job.ctx, event{read: &r, err: err, generation: job.generation, initial: job.initial, after: job.after, window: job.window, anchor: job.after, delta: job.delta}) {
+					break
+				}
+				if job.window {
 					break
 				}
 				if err == nil {
@@ -235,7 +254,13 @@ func (d *dashboard) drain() {
 					d.state = *e.state
 					d.reselect()
 				}
+			case e.search != nil && e.searchGeneration == d.searchGeneration:
+				d.consumeSearch(e)
 			case e.read != nil && e.generation == d.generation:
+				if e.window {
+					d.consumeWindow(e)
+					continue
+				}
 				if e.err != nil {
 					d.logError = singleLine(e.err.Error())
 					continue
@@ -255,6 +280,7 @@ func (d *dashboard) drain() {
 					d.top = max(0, d.top-dropped)
 				}
 				d.cursor = e.read.Next
+				d.streamFirst, d.streamEnd = e.read.First, e.read.End
 				d.loaded = true
 			}
 		default:
@@ -327,6 +353,7 @@ func (d *dashboard) syncLogView() {
 	}
 	changed := alias != d.logAlias || runID != d.logRun
 	if changed {
+		d.resetNavigation()
 		d.buffer.reset(d.state.Project.Logs.Timestamps)
 		d.logAlias, d.logRun = alias, runID
 		d.logError = ""
@@ -336,7 +363,18 @@ func (d *dashboard) syncLogView() {
 		d.follow = true
 		d.top, d.horizontal, d.detailTop = 0, 0, 0
 	}
-	want := ok && runID != "" && d.tab == 0 && !d.small
+	if (d.tab != 0 || d.small) && (d.searchBusy || d.searchEditing) {
+		d.cancelSearch()
+		d.searchEditing = false
+	}
+	want := ok && runID != "" && d.tab == 0 && !d.small && !d.history
+	if d.history && !changed {
+		if d.tab != 0 || d.small || !ok {
+			d.cancelWindow()
+			d.cancelSearch()
+		}
+		return
+	}
 	if !changed && want == d.jobActive {
 		return
 	}
@@ -358,7 +396,7 @@ func (d *dashboard) syncLogView() {
 	}
 }
 func (d *dashboard) action(action string) {
-	if d.help || d.small {
+	if d.help || d.small || d.searchEditing {
 		return
 	}
 	item, ok := d.current()
@@ -416,8 +454,7 @@ func (d *dashboard) setFocus(p pane) {
 func (d *dashboard) move(delta int) {
 	if d.focus == detailPane {
 		if d.owner != projectPane && d.tab == 0 {
-			d.follow = false
-			d.top = max(0, d.top+delta)
+			d.scrollLogs(delta)
 		} else {
 			d.detailTop = max(0, d.detailTop+delta)
 		}
@@ -445,11 +482,21 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 		{gocui.KeyArrowLeft, func() { d.horizontal = max(0, d.horizontal-10) }}, {gocui.KeyArrowRight, func() { d.horizontal += 10 }},
 		{'[', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }}, {']', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }},
 		{'S', func() { d.action("start") }}, {'s', func() { d.action("stop") }}, {'r', func() { d.action("restart") }},
-		{'G', func() { d.follow = true }},
+		{'G', d.goFollow}, {gocui.KeyHome, d.goHome},
+		{'/', d.openSearch}, {'n', func() { d.nextMatch(1) }}, {'N', func() { d.nextMatch(-1) }},
+		{gocui.KeyBackspace, func() {}}, {gocui.KeyBackspace2, func() {}},
 	}
 	for _, binding := range bindings {
 		fn := binding.fn
 		if err := g.SetKeybinding("", binding.key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
+			if d.searchEditing {
+				d.searchKey(binding.key)
+				return nil
+			}
+			if binding.key == gocui.KeyEsc && d.searchQuery != "" && !d.help {
+				d.clearSearch()
+				return nil
+			}
 			if d.help {
 				switch binding.key {
 				case gocui.KeyEsc:
@@ -463,6 +510,11 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 			}
 			if !d.small {
 				fn()
+				// Activate the editor synchronously: a terminal can deliver /term and
+				// Enter in one event batch, before the next manager repaint.
+				if binding.key == '/' && d.searchEditing {
+					return d.layout(g)
+				}
 			}
 			return nil
 		}); err != nil {
@@ -470,11 +522,21 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 		}
 	}
 	for _, key := range []any{'q', gocui.KeyCtrlC} {
-		if err := g.SetKeybinding("", key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error { return gocui.ErrQuit }); err != nil {
+		if err := g.SetKeybinding("", key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
+			if d.searchEditing {
+				d.searchKey(key)
+				return nil
+			}
+			return gocui.ErrQuit
+		}); err != nil {
 			return err
 		}
 	}
 	if err := g.SetKeybinding("", '?', gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
+		if d.searchEditing {
+			d.searchKey('?')
+			return nil
+		}
 		if !d.small {
 			d.help = !d.help
 		}

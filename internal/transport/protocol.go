@@ -7,7 +7,7 @@ import (
 	"github.com/nullco/lazyrun/internal/model"
 )
 
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 type Operation string
 
@@ -19,6 +19,8 @@ const (
 	Stop       Operation = "stop"
 	Restart    Operation = "restart"
 	ReadLogs   Operation = "read_logs"
+	WindowLogs Operation = "window_logs"
+	SearchLogs Operation = "search_logs"
 )
 
 // Payloads remain operation-specific; keep environment-bearing control messages
@@ -79,6 +81,19 @@ type StartPayload struct {
 
 type AliasPayload struct {
 	Alias string `json:"alias"`
+}
+
+type WindowLogsPayload struct {
+	Alias  string `json:"alias"`
+	RunID  string `json:"runId"`
+	Anchor uint64 `json:"anchor"`
+	Before int    `json:"before"`
+	Limit  int    `json:"limit"`
+}
+type SearchLogsPayload struct {
+	Alias  string                 `json:"alias"`
+	RunID  string                 `json:"runId"`
+	Search model.LogSearchRequest `json:"search"`
 }
 
 type ReadLogsPayload struct {

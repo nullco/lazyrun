@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/nullco/lazyrun/internal/logsearch"
+)
 
 // CommandState separates the current configuration from the latest run's
 // immutable definition. A moved active alias still belongs to its original pane.
@@ -32,10 +36,16 @@ type LogRecord struct {
 
 type LogRead struct {
 	RunID       string      `json:"runId"`
-	Data        []byte      `json:"data"` // JSON base64 retains invalid UTF-8 safely.
-	Next        uint64      `json:"next"` // Resume with after + same run ID; may jump over gaps.
+	Data        []byte      `json:"data"`  // JSON base64 retains invalid UTF-8 safely.
+	Next        uint64      `json:"next"`  // Resume with after + same run ID; may jump over gaps.
+	First       uint64      `json:"first"` // Earliest retained raw byte (or End for empty logs).
+	End         uint64      `json:"end"`   // Published stream end at read time.
 	Truncated   bool        `json:"truncated"`
 	Unavailable bool        `json:"unavailable,omitempty"`
 	Records     []LogRecord `json:"records,omitempty"`
 	Error       string      `json:"error,omitempty"`
 }
+
+type LogSearchRequest = logsearch.Request
+type LogSearchResult = logsearch.Result
+type LogMatch = logsearch.Match

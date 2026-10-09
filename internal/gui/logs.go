@@ -14,7 +14,10 @@ const (
 	MaxBufferLines = 10000
 )
 
-type logLine struct{ text, prefix string }
+type logLine struct {
+	text, prefix string
+	cursor       uint64
+}
 type logBuffer struct {
 	lines      []logLine
 	bytes      int
@@ -22,6 +25,8 @@ type logBuffer struct {
 	style      style
 	evicted    bool
 	timestamps bool
+	rawNext    uint64
+	rawChunk   uint64
 }
 
 func (b *logBuffer) reset(timestamps bool) { *b = logBuffer{timestamps: timestamps} }
@@ -29,10 +34,16 @@ func (b *logBuffer) reset(timestamps bool) { *b = logBuffer{timestamps: timestam
 // append retains sanitized bytes, not a potentially unbounded gocui buffer.
 // Returns the number of old logical lines evicted, for paused scroll anchoring.
 func (b *logBuffer) append(data []byte, at time.Time) int {
-	text := b.filter.Feed(data)
+	return b.appendAt(data, at, b.rawNext)
+}
+func (b *logBuffer) appendAt(data []byte, at time.Time, cursor uint64) int {
+	b.rawChunk = cursor
+	b.rawNext = cursor + uint64(len(data))
+	text, breaks := b.filter.feedAt(data, cursor, true)
+	breakIndex := 0
 	for len(text) > 0 {
 		if len(b.lines) == 0 {
-			b.newLine(at)
+			b.newLine(at, cursor)
 		}
 		i := strings.IndexByte(text, '\n')
 		part := text
@@ -51,7 +62,8 @@ func (b *logBuffer) append(data []byte, at time.Time) int {
 		if i < 0 {
 			break
 		}
-		b.newLine(time.Time{})
+		b.newLine(time.Time{}, breaks[breakIndex].next)
+		breakIndex++
 		text = text[i+1:]
 	}
 	return b.trim()
@@ -68,29 +80,38 @@ func (b *logBuffer) scanStyle(text string) {
 		text = text[end+1:]
 	}
 }
-func (b *logBuffer) newLine(at time.Time) {
+func (b *logBuffer) newLine(at time.Time, cursor uint64) {
 	prefix := b.style.sequence()
 	text := ""
 	if b.timestamps && !at.IsZero() {
 		text = at.UTC().Format("2006-01-02T15:04:05.000Z ")
 	}
-	b.lines = append(b.lines, logLine{text: text, prefix: prefix})
+	b.lines = append(b.lines, logLine{text: text, prefix: prefix, cursor: cursor})
 	b.bytes += len(prefix) + len(text) + 1
 }
-func (b *logBuffer) marker(text string) int {
+func (b *logBuffer) marker(text string) int { return b.markerAt(text, b.rawNext) }
+func (b *logBuffer) markerAt(text string, cursor uint64) int {
+	b.rawNext = cursor
 	b.filter.Reset()
 	b.style = style{}
 	if len(b.lines) > 0 {
 		last := &b.lines[len(b.lines)-1]
 		if last.text != "" {
-			b.newLine(time.Time{})
+			b.newLine(time.Time{}, b.rawNext)
 		} else {
 			prefix := b.style.sequence()
 			b.bytes += len(prefix) - len(last.prefix)
 			last.prefix = prefix
+			last.cursor = cursor
 		}
 	}
-	return b.append([]byte("["+text+"]\n"), time.Time{})
+	dropped := b.append([]byte("["+text+"]\n"), time.Time{})
+	b.rawNext = cursor
+	b.rawChunk = cursor
+	if len(b.lines) > 0 {
+		b.lines[len(b.lines)-1].cursor = cursor
+	}
+	return dropped
 }
 func (b *logBuffer) trim() int {
 	dropped := 0
@@ -121,6 +142,7 @@ func (b *logBuffer) trim() int {
 			text = text[start:]
 		}
 		line.text = strings.Clone(text)
+		line.cursor = b.rawChunk // approximate anchor for a byte-bounded huge fragment
 		b.bytes = len(text) + len(line.prefix) + 1
 		b.evicted = true
 	}
@@ -137,24 +159,24 @@ func (b *logBuffer) consume(r model.LogRead, after uint64, initial bool) int {
 		expected = r.Records[0].Cursor
 	}
 	if initial && r.Truncated {
-		dropped += b.marker("output truncated or dropped")
+		dropped += b.markerAt("output truncated or dropped", max(after, r.First))
 	}
 	for _, record := range r.Records {
 		if record.Cursor != expected {
-			dropped += b.marker("output truncated or dropped")
+			dropped += b.markerAt("output truncated or dropped", record.Cursor)
 		}
-		dropped += b.append(record.Data, record.Time)
+		dropped += b.appendAt(record.Data, record.Time, record.Cursor)
 		expected = record.Cursor + uint64(len(record.Data))
 	}
 	if len(r.Records) == 0 && len(r.Data) > 0 {
 		if r.Truncated {
-			dropped += b.marker("output truncated or dropped")
+			dropped += b.markerAt("output truncated or dropped", r.Next-uint64(len(r.Data)))
 		}
-		dropped += b.append(r.Data, time.Time{})
+		dropped += b.appendAt(r.Data, time.Time{}, r.Next-uint64(len(r.Data)))
 		expected += uint64(len(r.Data))
 	}
 	if r.Next > expected {
-		dropped += b.marker("output truncated or dropped")
+		dropped += b.markerAt("output truncated or dropped", r.Next)
 	}
 	return dropped
 }

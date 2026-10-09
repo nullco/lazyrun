@@ -25,5 +25,5 @@ func (b *memoryOutput) read(runID string, after uint64, limit int) (model.LogRea
 	if end > b.total {
 		end = b.total
 	}
-	return model.LogRead{RunID: runID, Data: append([]byte(nil), b.data[after-first:end-first]...), Next: end, Truncated: gap}, nil
+	return model.LogRead{RunID: runID, Data: append([]byte(nil), b.data[after-first:end-first]...), Next: end, First: first, End: b.total, Truncated: gap}, nil
 }

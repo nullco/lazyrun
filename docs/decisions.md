@@ -194,6 +194,47 @@ is base64 in JSON. Initial tail reads are byte-bounded before counting lines
 (default 1,000; zero means byte limit only). Capture times are always retained;
 `logs.timestamps` only controls dashboard display.
 
+## Retained-log navigation and search (protocol 3)
+
+Protocol 3 adds indexed window reads and resumable literal searches; ordinary
+raw cursor/tail reads and lifecycle authority remain unchanged. It deliberately
+rejects live protocol-2 supervisors. Never remove locks/socket or auto-replace a
+live supervisor during this upgrade. Old disk format/metadata remains readable.
+
+Window reads count retained bytes backwards through the existing record index,
+not byte-cursor distance across losses. Responses expose the oldest retained byte
+and published end. The GUI maps emitted newlines back to raw cursors, ignoring
+newlines inside discarded terminal strings, to anchor backward/forward paging.
+Historical windows are 8 KiB: even a newline-only page cannot exceed the 10,000
+line UI cap and evict the beginning that Home just requested. Huge lines use
+bounded fragments; Home and G explicitly seek earliest retained/live tail.
+
+Search is case-sensitive literal terminal text, limited to 256 query bytes.
+Streaming KMP is linear, carries UTF-8/escape-parser state and raw positions
+across capture records/requests, and resets at explicit gaps. It excludes
+ANSI/control strings and display timestamps, with the same CR/tab/UTF-8/control
+semantics as the GUI. A sanitizer-equivalence fuzz test guards this boundary.
+Match positions include raw line starts and display columns, so horizontal
+scrolling reveals matches in long lines; very large lines seek a match fragment.
+
+Each request scans at most 256 KiB (disk lock only per 64 KiB read), returns at
+most 64 matches, and carries a validated bounded continuation with the client.
+No server-side search sessions, full-file buffers, persistent indexes, regex
+backtracking or logged query terms. The GUI retains only the current match batch;
+next pages resume scanning, while uncached previous navigation scans the prefix
+for its last eligible match (including overlapping matches). That reverse case
+is linear, not an instant indexed lookup; ordinary cached navigation is direct.
+The published end is fixed for the search, while rotation/gaps can still overtake
+it and are reported. Search cancellation prevents subsequent requests; an accepted
+bounded disk read may finish. Filesystem stalls retain the existing IO caveat.
+
+One coalesced search worker and one coalesced log/window worker use request
+contexts, generations, run IDs and the bounded UI mailbox. Alias/run changes,
+Details/minimum-size modes and quit cancel local requests; never capture or
+supervision. An editable, byte-bounded prompt consumes lifecycle/quit letters as
+text. Highlighting runs only on cropped viewport text, restores application
+styles afterwards, and never expands an entire long line into styled cells.
+
 ## M5 dashboard and terminal boundary
 
 Use `github.com/jesseduffield/gocui` at the exact pseudo-version used by the
@@ -227,7 +268,9 @@ remain headless. Poll state every 400 ms and selected logs every 200 ms, with
 bounded request deadlines. A single log worker coalesces selection changes;
 cancel its request context and tag results with a generation and run ID so stale
 responses cannot contaminate another view. Details/minimum-size mode suspends
-log reads, not capture. A paused log view keeps ingesting within its bounds.
+log reads, not capture. A normally paused log view keeps ingesting within its
+bounds. Historical paging/search jumps instead use a bounded snapshot window;
+G reloads the live tail.
 One outstanding lifecycle request per dashboard prevents key-repeat queues;
 server-side serialization still arbitrates other dashboards. Never retry a
 mutation after response loss.
@@ -287,7 +330,7 @@ reported separately and are not represented as reachable exploits.
 Changing the provisional module path to the configured `github.com/nullco/lazyrun`
 origin changes import/install identity, not project IDs, state namespaces or wire
 compatibility. Display version comes from a release linker override, the module
-version for `go install @tag`, or source VCS revision/dirty metadata. Protocol 2
+version for `go install @tag`, or source VCS revision/dirty metadata. Protocol 3
 remains the compatibility authority. Static CGO-disabled Linux amd64/arm64
 packages use trimmed paths, disabled build VCS data, normalized archives and
 checksums, retaining Go/dependency license and NOTICE texts. An explicit source

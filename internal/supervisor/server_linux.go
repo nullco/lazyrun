@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/nullco/lazyrun/internal/config"
+	"github.com/nullco/lazyrun/internal/logsearch"
 	"github.com/nullco/lazyrun/internal/logstore"
 	"github.com/nullco/lazyrun/internal/model"
 	"github.com/nullco/lazyrun/internal/runtime"
@@ -219,6 +220,20 @@ func (b *backend) handle(req transport.Request) transport.Response {
 		}
 		run, err := b.manager.Stop(payload.Alias)
 		return transport.Reply(req, run, runtimeError(err))
+	case transport.WindowLogs:
+		var payload transport.WindowLogsPayload
+		if err := transport.Decode(req.Payload, &payload); err != nil {
+			return invalid(req, err)
+		}
+		read, err := b.manager.WindowOutput(payload.Alias, payload.RunID, payload.Anchor, payload.Before, payload.Limit)
+		return transport.Reply(req, read, runtimeError(err))
+	case transport.SearchLogs:
+		var payload transport.SearchLogsPayload
+		if err := transport.Decode(req.Payload, &payload); err != nil {
+			return invalid(req, err)
+		}
+		read, err := b.manager.SearchOutput(payload.Alias, payload.RunID, payload.Search)
+		return transport.Reply(req, read, runtimeError(err))
 	case transport.ReadLogs:
 		var payload transport.ReadLogsPayload
 		if err := transport.Decode(req.Payload, &payload); err != nil {
@@ -253,6 +268,7 @@ func runtimeError(err error) *transport.Error {
 		{runtime.ErrRemoved, transport.CodeRemoved}, {runtime.ErrRestartPending, transport.CodeRestartPending},
 		{runtime.ErrRestartBlocked, transport.CodeRestartBlocked}, {runtime.ErrUnknownAlias, transport.CodeUnknownAlias},
 		{runtime.ErrRunChanged, transport.CodeRunChanged}, {runtime.ErrCursor, transport.CodeInvalid},
+		{logsearch.ErrInvalid, transport.CodeInvalid},
 	} {
 		if errors.Is(err, pair.err) {
 			code = pair.code

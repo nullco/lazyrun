@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jesseduffield/gocui"
+	"github.com/mattn/go-runewidth"
 	"github.com/nullco/lazyrun/internal/model"
 )
 
@@ -82,7 +83,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		d.syncLogView()
 	}
 	if d.small {
-		for _, name := range []string{"project", "services", "tasks", "detail", "notification", "footer", "help"} {
+		for _, name := range []string{"project", "services", "tasks", "detail", "notification", "footer", "help", "search"} {
 			_ = g.DeleteView(name)
 		}
 		v, err := view(g, "minimum", "", rectangle{-1, -1, max(1, width), max(1, height)}, false)
@@ -162,6 +163,12 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		}
 		title = singleLine(item.Run.Definition.Alias) + ": " + tabs + " - " + outcome(item.Run)
 		if d.tab == 0 {
+			if d.history {
+				title += " - history"
+			}
+			if d.streamFirst > 0 {
+				title += " - beginning not retained"
+			}
 			if d.follow {
 				title += " - following"
 			} else {
@@ -194,12 +201,25 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		return err
 	}
 	text := ""
-	if time.Now().Before(d.noticeUntil) {
-		text = d.notice
-	} else if !d.connected {
+	if d.windowBusy {
+		text = "Loading retained log page…"
+	} else if d.searchQuery != "" {
+		text = d.searchStatus()
+	}
+	if !d.connected {
 		text = connection
+	} else if time.Now().Before(d.noticeUntil) {
+		if text != "" {
+			text = d.notice + " | " + text
+		} else {
+			text = d.notice
+		}
 	} else if d.logError != "" {
-		text = "Log warning: " + d.logError
+		if text != "" {
+			text = "Log warning: " + d.logError + " | " + text
+		} else {
+			text = "Log warning: " + d.logError
+		}
 	}
 	v.FgColor = gocui.ColorYellow + 8
 	if !d.connected {
@@ -237,6 +257,24 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		return err
 	}
 	_ = g.DeleteView("help")
+	if d.searchEditing {
+		v, err := view(g, "search", "Search all retained logs — Enter searches, Esc cancels", rectangle{2, height - 5, width - 3, height - 2}, true)
+		if err != nil {
+			return err
+		}
+		v.Editable = true
+		v.Editor = searchEditor{d: d, g: g}
+		innerWidth, _ := v.Size()
+		offset := max(0, runewidth.StringWidth(d.searchDraft)-innerWidth+1)
+		fmt.Fprint(v, crop(d.searchDraft, "", offset, innerWidth))
+		_ = v.SetCursor(min(innerWidth-1, runewidth.StringWidth(d.searchDraft)), 0)
+		_, _ = g.SetViewOnTop("search")
+		g.Cursor = true
+		_, err = g.SetCurrentView("search")
+		return err
+	}
+	_ = g.DeleteView("search")
+	g.Cursor = false
 	_, err = g.SetCurrentView(paneNames[d.focus])
 	return err
 }
@@ -250,6 +288,7 @@ func (d *dashboard) showDetails(v *gocui.View, text string) {
 	putLines(v, lines, d.detailTop, d.horizontal)
 }
 func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
+	d.logWidth, d.logHeight = v.Size()
 	if item.Run.ID == "" {
 		v.FgColor = gocui.ColorWhite | gocui.AttrDim
 		putLines(v, textLines("Not started. Press S to start/run this command."), 0, 0)
@@ -275,6 +314,7 @@ func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
 		fmt.Fprint(v, crop(coloredLabel("[older output discarded from dashboard buffer]", styleYellow), "", 0, v.InnerWidth()), "\n")
 		height--
 	}
+	d.logHeight = height
 	bottom := max(0, len(lines)-height)
 	if d.follow {
 		d.top = bottom
@@ -283,7 +323,15 @@ func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
 	}
 	// putLines uses view height; slice also accounts for the eviction banner.
 	end := min(len(lines), d.top+height)
-	putLines(v, lines[d.top:end], 0, d.horizontal)
+	width, _ := v.Size()
+	for i := d.top; i < end; i++ {
+		if i > d.top {
+			fmt.Fprint(v, "\n")
+		}
+		line := logLine{text: crop(lines[i].text, lines[i].prefix, d.horizontal, width)}
+		line = highlightSearch(line, d.searchQuery)
+		fmt.Fprint(v, line.text)
+	}
 }
 
 const helpText = `Navigation
@@ -295,6 +343,9 @@ Enter / Esc       Focus details / return to owning pane
 PgUp / PgDn       Scroll by ten lines; Left / Right scroll sideways
 Left click        Focus pane; select a clicked command (no lifecycle action)
 Mouse wheel       Navigate hovered list; scroll Logs / Details / Help
+Home / G          Earliest retained output / return to live follow
+/                 Literal, case-sensitive search of all retained run output
+n / N             Next / previous match; Esc clears/cancels search
 
 Selected command only (never project-wide)
 S                 Start service / run task

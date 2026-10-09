@@ -41,7 +41,7 @@ func (d *dashboard) mouseBindings(g *gocui.Gui) error {
 }
 
 func (d *dashboard) mouseClick(g *gocui.Gui, p pane, x, y int) {
-	if d.small || d.help {
+	if d.small || d.help || d.searchEditing {
 		return
 	}
 	v, err := g.View(paneNames[p])
@@ -64,7 +64,7 @@ func (d *dashboard) mouseClick(g *gocui.Gui, p pane, x, y int) {
 }
 
 func (d *dashboard) mouseWheel(p pane, delta int) {
-	if d.small || d.help {
+	if d.small || d.help || d.searchEditing {
 		return
 	}
 	d.setFocus(p)

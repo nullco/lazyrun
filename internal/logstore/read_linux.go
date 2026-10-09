@@ -160,14 +160,19 @@ func (o *Output) read(after uint64, limit int) (model.LogRead, error) {
 	if limit < 1 || limit > MaxRead {
 		return model.LogRead{}, ErrCursor
 	}
-	result := model.LogRead{RunID: o.runID, Next: after, Error: o.Error(), Unavailable: o.unavailable || o.released}
+	first := o.end
+	order := o.order()
+	if len(order) > 0 {
+		first = o.segments[order[0]].entries[0].cursor
+	}
+	result := model.LogRead{RunID: o.runID, Next: after, First: first, End: o.end, Error: o.Error(), Unavailable: o.unavailable || o.released}
 	if result.Unavailable {
 		return result, nil // no retained stream exists against which to validate after
 	}
 	if after > o.end {
 		return model.LogRead{}, ErrCursor
 	}
-	for _, idx := range o.order() {
+	for _, idx := range order {
 		s := &o.segments[idx]
 		var f *os.File
 		for _, e := range s.entries {
@@ -218,6 +223,40 @@ func (o *Output) read(after uint64, limit int) (model.LogRead, error) {
 		result.Next = o.end
 	}
 	return result, nil
+}
+
+// Window seeks by retained-byte index, not cursor subtraction (which would
+// mistake output losses for retained bytes). The response includes context on
+// both sides of anchor, within the existing 64 KiB read bound.
+func (o *Output) Window(anchor uint64, before, limit int) (model.LogRead, error) {
+	if before < 0 || before > limit || limit < 1 || limit > MaxRead {
+		return model.LogRead{}, ErrCursor
+	}
+	o.disk.Lock()
+	defer o.disk.Unlock()
+	if o.unavailable || o.released {
+		return o.read(anchor, limit)
+	}
+	if anchor > o.end {
+		return model.LogRead{}, ErrCursor
+	}
+	start := anchor
+	remaining := before
+	order := o.order()
+	for i := len(order) - 1; i >= 0 && remaining > 0; i-- {
+		entries := o.segments[order[i]].entries
+		for j := len(entries) - 1; j >= 0 && remaining > 0; j-- {
+			e := entries[j]
+			if e.cursor >= anchor {
+				continue
+			}
+			end := min(anchor, e.cursor+uint64(e.size))
+			take := min(uint64(remaining), end-e.cursor)
+			start = end - take
+			remaining -= int(take)
+		}
+	}
+	return o.read(start, limit)
 }
 
 // Tail bounds bytes before counting lines. A partial huge line cannot grow the

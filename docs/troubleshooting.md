@@ -33,6 +33,24 @@ Manual log scrolling pauses follow, not collection. `G` resumes following;
 Left/Right scroll long lines horizontally. `[output truncated or dropped]` marks
 missing disk bytes. The dashboard-buffer eviction banner means the independent
 10,000-line/2 MiB UI ceiling was reached; disk retention may still contain more.
+Scroll past the loaded top to page in older retained output, or press `Home` to
+jump to the earliest retained bytes; `G` reloads and follows the live tail. Paging
+uses bounded windows rather than accumulating whole logs. Very long lines can
+span page fragments. A "beginning not retained" title/notification means rotation
+or loss removed the original beginning; there is nothing earlier to load.
+
+`/` opens a literal, case-sensitive search across all retained output of the
+selected latest run. Enter submits; `n`/`N` navigate highlighted matches, Esc
+clears/cancels, and `G` returns to live follow. Search ignores ANSI/control strings
+and UI timestamps, expands tabs, and replaces invalid UTF-8 like the dashboard.
+Queries are at most 256 UTF-8 bytes; no regex or multiline matching. The prompt
+accepts text and Backspace; Esc/Ctrl-C cancels without executing lifecycle keys.
+Search progresses asynchronously in bounded 256 KiB requests. Cancellation stops
+further requests (an already accepted bounded read can finish); disk stalls are
+not given an instant-response guarantee. The search has a published-end snapshot;
+submit a new search to include later output. Rotation during search may remove
+matches or create gaps, which are reported rather than silently searched across.
+
 Use `--logs --after` for bounded raw reads. ANSI colors are supported but terminal
 control strings are stripped; progress carriage returns become separate lines.
 
@@ -150,7 +168,8 @@ replace live ring files to try to repair capture. Read errors/checksum failures
 are visible, and unverified data is not returned during recovery. Logs themselves
 may contain secrets; don't share raw log files casually.
 
-Protocol version 2 is required for disk logs. An old live supervisor is not a
+Protocol version 3 is required for the current dashboard's paging/search APIs.
+Protocol 2 introduced disk logs but cannot serve the new navigation requests. An old live supervisor is not a
 stale socket: don't delete its locks/socket. After verifying/stopping its commands,
 identify and stop the old supervisor deliberately before using the new binary.
 
