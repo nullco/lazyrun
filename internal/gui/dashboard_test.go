@@ -328,7 +328,7 @@ func TestHeadlessLayoutEmptyStatesHelpAndViewportBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, _ = g.View("help")
-	if !strings.Contains(v.Buffer(), "SIGTERM") {
+	if v.Title != "Keybindings" || !strings.Contains(v.Buffer(), "View project details") || !strings.Contains(v.Buffer(), "Global") {
 		t.Fatal(v.Buffer())
 	}
 	d.help = false

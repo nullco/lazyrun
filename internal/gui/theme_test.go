@@ -118,8 +118,12 @@ func TestRenderedThemeTracksFocusSelectionAndHelp(t *testing.T) {
 				checkCell(x, 29, footerColor, gocui.ColorDefault)
 			}
 			if frame.help {
-				checkRoundedCorners(rectangle{2, 1, 97, 28})
-				checkCell(2, 3, g.SelFrameColor, gocui.ColorDefault)
+				x0, y0, x1, y1, err := g.ViewPosition("help")
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkRoundedCorners(rectangle{x0, y0, x1, y1})
+				checkCell(x0, y0+1, g.SelFrameColor, gocui.ColorDefault)
 				if g.CurrentView().Name() != "help" {
 					t.Fatal("help did not take focus")
 				}

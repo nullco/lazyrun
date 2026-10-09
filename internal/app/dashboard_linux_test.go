@@ -96,7 +96,7 @@ func TestDashboardKeyboardActionsReconnectResizeAndQuit(t *testing.T) {
 	keys(t, master, "S")
 	eventuallyIntegration(t, func() bool { return out.contains("Select a service or task") })
 	keys(t, master, "2?S")
-	eventuallyIntegration(t, func() bool { return out.contains("Navigation") })
+	eventuallyIntegration(t, func() bool { return out.contains("Keybindings") })
 	if findRun(f.state(), "pulse").ID != "" {
 		t.Fatal("help popup started command")
 	}

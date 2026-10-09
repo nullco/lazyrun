@@ -285,17 +285,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		putLines(v, textLines(d.footerHints(width)), 0, 0)
 	}
 	if d.help {
-		v, err := view(g, "help", "Help - j/k scroll; Esc / ? closes", rectangle{2, 1, width - 3, height - 2}, true)
-		if err != nil {
-			return err
-		}
-		lines := textLines(helpText)
-		_, h := v.Size()
-		d.helpTop = min(d.helpTop, max(0, len(lines)-h))
-		putLines(v, lines, d.helpTop, 0)
-		_, _ = g.SetViewOnTop("help")
-		_, err = g.SetCurrentView("help")
-		return err
+		return d.showHelp(g, width, height)
 	}
 	_ = g.DeleteView("help")
 	if d.searchEditing {
@@ -372,29 +362,3 @@ func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
 		fmt.Fprint(v, line.text)
 	}
 }
-
-const helpText = `Navigation
-1 / 2 / 3         Project / Services / Tasks
-Tab / Shift-Tab   Next / previous pane
-j / k, Up / Down  Select command; scroll focused detail pane
-Enter / Esc       Focus details / return to owning pane
-[ / ]             Switch Logs / Details
-PgUp / PgDn       Scroll by ten rows; Logs wrap to pane width
-Left / Right      Scroll Details sideways
-Left click        Expand header; focus pane/select command (no lifecycle action)
-Mouse wheel       Navigate hovered list; scroll Logs / Details / Help
-Home / G          Earliest retained output / return to live follow
-/ (focused Logs)  Literal, case-sensitive search of all retained run output
-n / N (Logs only) Next / previous match; Esc clears/cancels log search
-
-Selected command only (never project-wide)
-S                 Start service / run task
-s                 Graceful stop: SIGTERM only, no force-kill
-r                 Restart service / rerun task (stop before start)
-
-Logs follow by default; scrolling pauses. G resumes following.
-Config changes affect the next run; reopen to synchronize.
-? / Esc           Toggle / dismiss this help
-q / Ctrl-C        Quit dashboard ONLY; commands continue
-
-Small screens: lists collapse; narrow layouts keep Logs/Details at the bottom.`

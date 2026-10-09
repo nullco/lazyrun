@@ -175,7 +175,7 @@ func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	// global prompt, ? would become search text instead of opening Help; if G
 	// cleared the log search here, returning to Logs would lose this match.
 	keys(t, master, "3/nNG?")
-	eventuallyIntegration(t, func() bool { return out.contains("Navigation") })
+	eventuallyIntegration(t, func() bool { return out.contains("Keybindings") })
 	out.clear()
 	keys(t, master, "?\r")
 	eventuallyIntegration(t, func() bool { return out.contains("n/N: jump") && out.contains("EARLY") })

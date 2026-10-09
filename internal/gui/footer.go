@@ -13,7 +13,7 @@ func (d *dashboard) footerHints(width int) string {
 	var primary, secondary []string
 	switch {
 	case d.help:
-		primary = []string{"↑ ↓: scroll", "Esc/?: close"}
+		primary = []string{"↑ ↓: navigate", "Esc/?: close"}
 		secondary = []string{"PgUp/PgDn: scroll"}
 	case d.logPaneFocused():
 		primary = []string{"PgUp/PgDn: scroll", "/: search", "G: follow"}

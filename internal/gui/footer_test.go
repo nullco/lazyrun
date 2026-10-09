@@ -30,7 +30,7 @@ func TestFooterHintsShowFocusedPaneActionsAndFitOneRow(t *testing.T) {
 			d.searchQuery = "needle"
 		}, []string{"/: search", "n/N: jump"}},
 		{"details", func(d *dashboard) { d.setFocus(servicesPane); d.setFocus(detailPane); d.tab = 1 }, []string{"↑ ↓: scroll", "← →: pan"}},
-		{"help", func(d *dashboard) { d.help = true }, []string{"↑ ↓: scroll", "Esc/?: close"}},
+		{"help", func(d *dashboard) { d.help = true }, []string{"↑ ↓: navigate", "Esc/?: close"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			d := testDashboard(t, &fakeClient{})

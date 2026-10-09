@@ -24,14 +24,18 @@ func (d *dashboard) mouseBindings(g *gocui.Gui) error {
 			}
 		}
 	}
+	if err := g.SetViewClickBinding(&gocui.ViewMouseBinding{ViewName: "help", Key: gocui.MouseLeft, Handler: func(point gocui.ViewMouseBindingOpts) error {
+		d.helpClick(point.Y)
+		return nil
+	}}); err != nil {
+		return err
+	}
 	for _, wheel := range []struct {
 		key   gocui.Key
 		delta int
 	}{{gocui.MouseWheelUp, -3}, {gocui.MouseWheelDown, 3}} {
 		if err := g.SetViewClickBinding(&gocui.ViewMouseBinding{ViewName: "help", Key: wheel.key, Handler: func(gocui.ViewMouseBindingOpts) error {
-			if d.help && !d.small {
-				d.helpTop = max(0, d.helpTop+wheel.delta)
-			}
+			d.moveHelp(wheel.delta)
 			return nil
 		}}); err != nil {
 			return err

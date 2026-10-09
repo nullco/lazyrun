@@ -278,7 +278,7 @@ func TestResponsiveResizePreservesPausedHistorySearchAndRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	help, _ := g.View("help")
-	if g.CurrentView().Name() != "help" || !strings.Contains(help.Buffer(), "Navigation") {
+	if g.CurrentView().Name() != "help" || !strings.Contains(help.Buffer(), "Local") {
 		t.Fatal("compact Help did not take focus", help.Buffer())
 	}
 	d.help = false
@@ -336,7 +336,7 @@ func TestCompactFooterKeepsContextualActionsComplete(t *testing.T) {
 		{"search", func(d *dashboard) { d.setFocus(servicesPane); d.setFocus(detailPane); d.searchQuery = "saved" }, []string{"/: search", "n/N: jump"}},
 		{"project", func(d *dashboard) { d.setFocus(projectPane) }, []string{"Tab: focus"}},
 		{"details", func(d *dashboard) { d.setFocus(servicesPane); d.setFocus(detailPane); d.tab = 1 }, []string{"↑ ↓: scroll", "← →: pan"}},
-		{"help", func(d *dashboard) { d.help = true }, []string{"↑ ↓: scroll", "Esc/?: close"}},
+		{"help", func(d *dashboard) { d.help = true }, []string{"↑ ↓: navigate", "Esc/?: close"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			d := navigationDashboard(t)

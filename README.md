@@ -51,8 +51,8 @@ lazyrun
 
 Select a command, then press `S` to start/run, `s` to stop, or `r` to restart.
 Use `Tab` to switch panes and `Enter` to focus Logs. `/` searches in focused
-Logs; `G` resumes following. Press `?` for help and `q` to quit the dashboard
-without stopping commands. On small screens, inactive panes collapse to clickable
+Logs; `G` resumes following. Press `?` for pane-specific keybindings and `q` to
+quit without stopping commands. On small screens, inactive panes collapse to clickable
 headers; narrow screens keep Logs/Details below the list accordion
 (minimum 40 columns × 10 rows).
 

@@ -100,7 +100,8 @@ type dashboard struct {
 	jobActive                  bool
 	follow                     bool
 	top, horizontal, detailTop int
-	helpTop                    int
+	helpTop, helpSelection     int
+	helpRows                   []int // last rendered popup rows; headings are -1
 }
 
 func newDashboard(ctx context.Context, client Client, state model.State, opts Options) *dashboard {
@@ -513,10 +514,14 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 				switch binding.key {
 				case gocui.KeyEsc:
 					d.help = false
-				case 'j', gocui.KeyArrowDown, gocui.KeyPgdn:
-					d.helpTop++
-				case 'k', gocui.KeyArrowUp, gocui.KeyPgup:
-					d.helpTop = max(0, d.helpTop-1)
+				case 'j', gocui.KeyArrowDown:
+					d.moveHelp(1)
+				case 'k', gocui.KeyArrowUp:
+					d.moveHelp(-1)
+				case gocui.KeyPgdn:
+					d.moveHelp(10)
+				case gocui.KeyPgup:
+					d.moveHelp(-10)
 				}
 				return nil
 			}
@@ -550,7 +555,7 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 			return nil
 		}
 		if !d.small {
-			d.help = !d.help
+			d.toggleHelp()
 		}
 		return nil
 	}); err != nil {

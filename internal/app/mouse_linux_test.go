@@ -61,10 +61,10 @@ tasks:
 	terminalMouse(t, master, 65, 40, 2) // wheel down pauses following
 	eventuallyIntegration(t, func() bool { return out.contains("PAUSED") })
 	keys(t, master, "?")
-	eventuallyIntegration(t, func() bool { return out.contains("Navigation") })
+	eventuallyIntegration(t, func() bool { return out.contains("Keybindings") })
 	out.clear()
 	terminalMouse(t, master, 65, 40, 4) // wheel scrolls the modal itself
-	eventuallyIntegration(t, func() bool { return out.contains("q / Ctrl-C") })
+	eventuallyIntegration(t, func() bool { return out.contains("Start service") })
 	terminalMouse(t, master, 0, 4, 15) // popup must block underlying task selection
 	keys(t, master, "?")
 	out.clear()
