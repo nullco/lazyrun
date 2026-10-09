@@ -28,7 +28,7 @@ func geometry(width, height int) map[string]rectangle {
 	// Framed coordinates include their borders. Adjacent border cells keep
 	// each pane distinct without an extra blank row or column.
 	const separation = 1
-	projectEnd := 4 // three content rows: name, root, connection
+	projectEnd := 3 // two content rows: name, connection
 	servicesStart := projectEnd + separation
 	servicesEnd := servicesStart + (bottom-servicesStart-separation)/2
 	return map[string]rectangle{
@@ -183,7 +183,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		connectionStyle = styleRed
 	}
 	if !d.collapsed[projectPane] {
-		putLines(v, textLines(coloredLabel(singleLine(d.state.Project.Name), "\x1b[1;36m")+"\n"+coloredLabel(singleLine(d.state.Project.Root), styleMuted)+"\n"+coloredLabel(connection, connectionStyle)), 0, 0)
+		putLines(v, textLines(coloredLabel(singleLine(d.state.Project.Name), "\x1b[1;36m")+"\n"+coloredLabel(connection, connectionStyle)), 0, 0)
 	}
 	for _, p := range []pane{servicesPane, tasksPane} {
 		name := paneNames[p]

@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jesseduffield/gocui"
@@ -27,12 +28,47 @@ func TestGeometryKeepsSeparateAdjacentBordersWithoutBlankGaps(t *testing.T) {
 					t.Fatalf("%dx%d: unusable framed pane %s: %+v", width, height, name, r)
 				}
 			}
-			if project.y1-project.y0-1 != 3 || tasks.y1 != detail.y1 || detail.y1 != height-2 {
+			if project.y1-project.y0-1 != 2 || tasks.y1 != detail.y1 || detail.y1 != height-2 {
 				t.Fatalf("%dx%d: project/footer space changed: %+v", width, height, areas)
 			}
 			if areas["footer"].y0 != detail.y1 || areas["footer"].y1-areas["footer"].y0-1 != 1 || areas["footer"].y0+1 != height-1 {
 				t.Fatalf("%dx%d: panes must end directly above the single footer row: %+v", width, height, areas)
 			}
+		}
+	}
+}
+
+func TestProjectPaneShowsNameAndConnectionWithPathInDetails(t *testing.T) {
+	g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: 100, Height: 30, OutputMode: gocui.OutputTrue, SupportOverlaps: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(g.Close)
+	d := testDashboard(t, &fakeClient{})
+	d.state.Project.Root = "/some/very/long/project/location/with/a/name"
+	d.connectionError = "offline"
+	for _, connected := range []bool{true, false} {
+		d.connected = connected
+		d.setFocus(projectPane)
+		if err := d.layout(g); err != nil {
+			t.Fatal(err)
+		}
+		status := "connected"
+		if !connected {
+			status = "DISCONNECTED: offline"
+		}
+		project, _ := g.View("project")
+		_, height := project.Size()
+		if height != 2 || strings.TrimSuffix(plain(project.Buffer()), "\n") != "demo\n"+status {
+			t.Fatal("project pane must show the name and connection in two rows", project.Buffer(), height)
+		}
+		d.setFocus(detailPane)
+		if err := d.layout(g); err != nil {
+			t.Fatal(err)
+		}
+		detail, _ := g.View("detail")
+		if !strings.Contains(detail.Buffer(), "Root: "+d.state.Project.Root) {
+			t.Fatal("project Details must retain the full path", detail.Buffer())
 		}
 	}
 }
