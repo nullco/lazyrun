@@ -128,10 +128,22 @@ func (d *Dir) Stat(name string, kind uint32) (unix.Stat_t, error) {
 	if err := unix.Fstatat(d.FD(), name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return stat, err
 	}
-	if stat.Uid != uint32(os.Geteuid()) || stat.Mode&0777 != 0600 || stat.Mode&unix.S_IFMT != kind || stat.Nlink != 1 {
-		return stat, fmt.Errorf("unsafe private file %s/%s: expected owner, mode 0600, type and one link", d.Path, name)
+	return stat, d.validatePathStat(name, stat, kind)
+}
+
+func (d *Dir) validatePathStat(name string, stat unix.Stat_t, kind uint32) error {
+	valid := stat.Uid == uint32(os.Geteuid()) && stat.Mode&0777 == 0600 && stat.Mode&unix.S_IFMT == kind
+	// Path lookup can pin an inode just before another launcher unlinks it;
+	// getattr then observes zero links rather than returning ENOENT. This is
+	// absence, not an unsafe live path. Do not relax owner/type/mode checks or
+	// apply this to opened file capabilities (which must remain linked).
+	if valid && stat.Nlink == 0 {
+		return unix.ENOENT
 	}
-	return stat, nil
+	if !valid || stat.Nlink != 1 {
+		return fmt.Errorf("unsafe private file %s/%s: expected owner, mode 0600, type and one link (uid=%d mode=%#o links=%d)", d.Path, name, stat.Uid, stat.Mode, stat.Nlink)
+	}
+	return nil
 }
 
 func (d *Dir) File(name string, flags int) (*os.File, error) {

@@ -4,9 +4,9 @@
 
 M1 provides the config/domain foundation; M2 proves the headless process-group
 engine; M3 adds detached supervision, reconnect, config synchronization, private
-IPC, and atomic metadata. M4 adds bounded disk capture/rotation; the dashboard
-remains M5.
-The headless CLI always goes through the same supervisor path the TUI will use;
+IPC, and atomic metadata. M4 adds bounded disk capture/rotation; M5 adds the
+client-only dashboard.
+The headless CLI and TUI always go through the same supervisor path;
 there is no in-process execution shortcut with weaker lifetime guarantees.
 
 Go 1.25 is the initial supported toolchain; the development environment has
@@ -191,6 +191,67 @@ Reads fetch at most 64 KiB of payload through the index; reconnect does not load
 whole files. Each response includes concatenated raw data plus timestamped slices
 with their original byte cursors, so mid-response gaps are unambiguous. Everything
 is base64 in JSON. Initial tail reads are byte-bounded before counting lines
-(default 1,000; zero means byte limit only). Scrolling/UI buffers and full terminal
-sanitization remain M5 responsibilities. Capture times are always retained;
-`logs.timestamps` only controls future display.
+(default 1,000; zero means byte limit only). Capture times are always retained;
+`logs.timestamps` only controls dashboard display.
+
+## M5 dashboard and terminal boundary
+
+Use `github.com/jesseduffield/gocui` at the exact pseudo-version used by the
+inspected lazydocker snapshot (`8cd33929c513`), not the ancient tagged v0.3.0.
+Its tcell backend supports simulation tests and true-color cells. The layout,
+controller and filter are original code; no lazydocker implementation was copied.
+No Docker/lazycore dependencies were added.
+
+The GUI depends on a narrow client interface, never runtime/exec/signal APIs.
+The default CLI requires terminal stdin/stdout before connecting; explicit flags
+remain headless. Poll state every 400 ms and selected logs every 200 ms, with
+bounded request deadlines. A single log worker coalesces selection changes;
+cancel its request context and tag results with a generation and run ID so stale
+responses cannot contaminate another view. Details/minimum-size mode suspends
+log reads, not capture. A paused log view keeps ingesting within its bounds.
+One outstanding lifecycle request per dashboard prevents key-repeat queues;
+server-side serialization still arbitrates other dashboards. Never retry a
+mutation after response loss.
+
+UI state belongs to the gocui event thread. Workers use a bounded 16-event
+mailbox. One acknowledged UI wakeup is outstanding at a time: gocui's ordinary
+`Update` spawns a goroutine per call and cannot cancel queued callbacks. Shutdown
+cancels/waits for local workers before restoring the terminal. State-read failures
+preserve a visibly disconnected last-known snapshot and disable actions. Read
+polling may reconnect to the same endpoint, but does not launch a replacement
+supervisor, resynchronize config, signal recorded PIDs, or retry mutations.
+Reopen deliberately for configuration refresh or supervisor-loss reconciliation.
+
+The selected view retains at most 10,000 logical lines AND 2 MiB of sanitized
+text, including timestamp/style prefixes. A huge partial line is byte-bounded
+independently of newline count. Eviction drops old strings/references and adjusts
+paused line anchoring; a persistent UI-eviction banner distinguishes it from disk
+loss. Long lines are horizontally scrollable rather than expanded into unbounded
+wrapped rows. Only visible rows/columns are sent to gocui, not the entire retained
+buffer; terminal cell arrays therefore remain screen-sized. Color state is
+canonicalized in bounded prefixes across line eviction/horizontal clipping.
+
+Audited gocui `escape.go`/`view.go`: it interprets SGR but also line erasure and
+carriage-return overwrites; malformed escapes can become literal cells. Do not
+rely on that parser as the security boundary. A separate streaming allowlist
+admits only complete, validated SGR (including 256/true colors). CSI carry is at
+most 128 bytes/20 parameters, UTF-8 carry at most three bytes. OSC/DCS/SOS/PM/APC
+strings are dropped without buffering until BEL/ST. Strip all other C0/C1 and
+Unicode format/bidi controls; normalize CR/CRLF, expand tabs and replace invalid
+UTF-8. Final incomplete UTF-8 is visibly replaced; incomplete control strings
+are discarded. Gaps reset parser carry so a lost terminator cannot suppress
+later output. Apply the same filtering without ANSI to paths, config, names and
+errors. Raw disk bytes and headless base64 responses are unchanged.
+
+Unit/simulation tests and sanitizer fuzzing cover this boundary. Real PTY tests
+exercise actual dashboard keys, task outcomes, environment snapshots, pause/follow,
+resize/minimum mode, restart/stop, reconnect, quit/Ctrl-C, SIGTERM, crash and hangup.
+These supplement, rather than replace, the M3 ownership/lifetime gates.
+
+Full-suite stress also exposed a pre-existing bootstrap race: Linux path lookup
+can pin the old socket inode just before a competing launcher unlinks it, then
+`fstatat` returns valid owner/type/mode with zero links instead of ENOENT. Treat
+that already-unlinked path as absent and re-probe under startup/ownership locks.
+Wrong owners/types/modes and multiple links remain errors; opened file capabilities
+still require exactly one link. Deterministic validation tests and repeated
+concurrent-bootstrap integration tests cover this distinction.

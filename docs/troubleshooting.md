@@ -12,6 +12,28 @@ metadata failure can happen **after** a start/restart was accepted. The CLI prin
 any returned run identity even when it exits unsuccessfully. There are no implicit
 mutation retries.
 
+## Dashboard / terminal
+
+Run plain `lazyrun` in a terminal; use `--state` when piping output or scripting.
+A useful dashboard requires at least 70x18 cells. Smaller sizes disable lifecycle
+keys but still allow `q` / Ctrl-C; resizing back preserves commands and selection.
+Press `?` for keys, `2`/`3` to select commands, and Enter to scroll their details.
+Errors appear as nonblocking notifications; the latest full notification is also
+in Details (scroll down). `!` next to a command means a run/metadata/log error.
+
+Manual log scrolling pauses follow, not collection. `G` resumes following;
+Left/Right scroll long lines horizontally. `[output truncated or dropped]` marks
+missing disk bytes. The dashboard-buffer eviction banner means the independent
+10,000-line/2 MiB UI ceiling was reached; disk retention may still contain more.
+Use `--logs --after` for bounded raw reads. ANSI colors are supported but terminal
+control strings are stripped; progress carriage returns become separate lines.
+
+A disconnected dashboard keeps last-known state, disables actions, and retries
+only reads against the same endpoint. It does not launch a new supervisor or
+retry a start/restart. Reopen deliberately for reconciliation/config refresh;
+inspect unknown runs before cleanup. Quitting, Ctrl-C, or closing the terminal
+never requests command stop.
+
 ## Private paths and compatibility
 
 Runtime files live under `$XDG_RUNTIME_DIR/lazyrun/<project-id>/` or the private
@@ -51,8 +73,9 @@ PID/PGID may have been reused; never blindly paste a stored ID into `kill`.
 ## Supervisor loss / unknown runs
 
 Transparent crash recovery is not promised. Children may exit when their output
-pipe closes, or remain alive and unmanaged. Reconnection launches a replacement
-only after ownership is free, then conservatively inspects durable metadata:
+pipe closes, or remain alive and unmanaged. Opening a new client can launch a
+replacement only after ownership is free, then conservatively inspects durable
+metadata (an existing disconnected dashboard does not auto-launch one):
 
 - Already collected outcomes are preserved.
 - Previous-boot or provably absent groups are historical, not running. If the old

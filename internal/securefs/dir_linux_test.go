@@ -3,12 +3,41 @@
 package securefs
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestUnlinkedPathStatIsAbsentWithoutRelaxingValidation(t *testing.T) {
+	d := &Dir{Path: "/private"}
+	for _, kind := range []uint32{unix.S_IFSOCK, unix.S_IFREG} {
+		stat := unix.Stat_t{Uid: uint32(os.Geteuid()), Mode: kind | 0600, Nlink: 0}
+		if err := d.validatePathStat("gone", stat, kind); !errors.Is(err, unix.ENOENT) {
+			t.Fatal(err)
+		}
+		stat.Nlink = 1
+		if err := d.validatePathStat("present", stat, kind); err != nil {
+			t.Fatal(err)
+		}
+		stat.Nlink = 2
+		if err := d.validatePathStat("linked", stat, kind); err == nil || errors.Is(err, unix.ENOENT) {
+			t.Fatal("hardlink accepted as absence", err)
+		}
+		stat.Nlink = 0
+		for _, invalid := range []unix.Stat_t{
+			{Uid: stat.Uid + 1, Mode: stat.Mode},
+			{Uid: stat.Uid, Mode: kind | 0644},
+			{Uid: stat.Uid, Mode: unix.S_IFLNK | 0600},
+		} {
+			if err := d.validatePathStat("unsafe", invalid, kind); err == nil || errors.Is(err, unix.ENOENT) {
+				t.Fatal("unsafe path accepted as absence", err)
+			}
+		}
+	}
+}
 
 func TestRejectSymlinksPermissionsAndHardlinks(t *testing.T) {
 	root := t.TempDir()

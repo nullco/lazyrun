@@ -1,8 +1,8 @@
 # lazyrun
 
 A Linux-first, keyboard-driven Go TUI for a project's named services and tasks.
-**Implementation in progress: detached supervision, bounded disk logs, and a
-headless client work; the dashboard is still to come.**
+**Implementation in progress: the dashboard, detached supervision, bounded disk
+logs, and headless client work; release hardening remains.**
 
 ## Current status
 
@@ -16,10 +16,12 @@ headless client work; the dashboard is still to come.**
   supervisor-loss handling. Real PTY tests cover terminal closure/client death.
 - **M4:** bounded disk capture, timestamp records, incremental/tail reads,
   rotation gaps, and visible disk/queue failures without blocking pipe draining.
-- **Next: M5** adds the dashboard; **M6** hardens the release.
+- **M5:** Project/Services/Tasks dashboard, Logs/Details tabs, keyboard actions,
+  help, resizing, pause/follow, bounded UI logs, and safe ANSI color rendering.
+- **Next: M6** hardens the release, including real Flask/Celery smoke tests.
 
-The headless CLI uses the detached supervisor, not an in-process execution path.
-Opening it starts no configured command; explicit start/restart requests do.
+Both the dashboard and headless CLI use the same detached supervisor.
+Opening either starts no configured command; explicit start/restart requests do.
 
 ## Build and validate configuration
 
@@ -33,13 +35,43 @@ cd /path/to/project
 
 `--check` walks upward to the nearest `lazyrun.yml`, validates it, and lists aliases
 in configuration order. It executes nothing and does not launch a supervisor.
-Without `--check`, the client connects or auto-launches a supervisor, synchronizes
-configuration, and prints state as JSON. No dashboard is drawn yet.
+Run `lazyrun` without action flags to open the dashboard. The client connects or
+auto-launches a supervisor and synchronizes configuration, but starts no commands.
+A terminal is required; scripts/pipes should use `--state` for JSON.
+
+### Dashboard workflow
+
+- `1` / `2` / `3`: focus Project / Services / Tasks; `j/k` or arrows select.
+- `Tab` / `Shift-Tab`: cycle panes; `Enter` focuses details, `Esc` returns.
+- `[` / `]`: Logs / Details. Project selection shows only project details.
+- `S`: start service / run task; `s`: SIGTERM stop; `r`: restart / rerun.
+- In focused logs, `j/k`, arrows, or `PgUp/PgDn` scroll and pause following;
+  `G` resumes. Left/Right scroll sideways through long lines.
+- `?`: contextual help; `q` / `Ctrl-C`: quit the dashboard, **not commands**.
+
+Commands retain their configured order. Active removed/moved aliases remain
+manageable in their original pane. Details distinguish the run snapshot from
+changed configuration, show actual outcomes and errors, and never show inherited
+environments. Reopen to synchronize config edits; there is no file watcher.
+Lifecycle requests are asynchronous and never implicitly retried or queued by
+repeated keypresses. Notifications do not block navigation; the latest is also
+readable in Details. Minimum dashboard size is 70 columns by 18 rows. Keyboard
+navigation is supported; mouse interactions are deferred.
+
+Logs start at `logs.tail`, continue by run-scoped cursors, and keep collecting
+while paused. Switching alias/run replaces the view buffer; switching tabs
+cancels only local reads. UI retention is independently capped at 10,000 logical
+lines and 2 MiB of sanitized text; explicit markers identify disk gaps and UI
+eviction. Only visible rows/columns enter gocui's cell buffer. Normal validated
+ANSI colors/styles are preserved; clipboard/title/hyperlink, cursor/erase, bidi,
+and other controls are removed. Carriage returns become newlines (CRLF stays one
+newline), tabs become spaces, and invalid UTF-8 becomes replacement characters.
+Optional timestamps label captured chunks, not exact application emission times.
 
 ### Headless workflow
 
 ```sh
-lazyrun --state                 # default; starts no commands
+lazyrun --state                 # JSON; starts no commands
 lazyrun --start api             # uses this shell's current environment
 lazyrun --stop api              # SIGTERM only; query state for completion
 lazyrun --restart api           # graceful stop, then current definition
@@ -49,7 +81,7 @@ lazyrun --logs api --after 0     # oldest retained bytes
 lazyrun --logs api --run-id RUN_ID --after CURSOR
 ```
 
-Choose one action per invocation. All output is JSON except `--check`/help.
+Choose one action per invocation. Headless output is JSON except `--check`/help.
 Log responses include the run ID, `next` byte cursor, `truncated` flag, and
 capture-time `records` (each with its own byte cursor and timestamp). Reads carry
 at most 64 KiB of raw output. Initial reads use `logs.tail` (default 1,000 lines);
@@ -106,7 +138,7 @@ The example is configuration only: it does not install or bundle a Flask app.
   are allowed. Directory/executable existence is checked at launch, not parsing.
 - `tail` must be nonnegative; `maxBytes` must be positive. Retention budgets are
   snapshotted per run; config changes apply to the next run. `timestamps` controls
-  future dashboard display, not whether capture times are recorded.
+  dashboard display, not whether capture times are recorded.
 - Symlinked invocation directories resolve to the physical project hierarchy.
   Distinct clones/worktrees have distinct identities.
 
@@ -118,7 +150,7 @@ snapshot. Inherited environment values are not serialized into run metadata.
 
 ## Runtime lifecycle and storage
 
-The headless engine uses `/bin/sh -c` by default, `/dev/null` stdin, a new process
+The supervisor engine uses `/bin/sh -c` by default, `/dev/null` stdin, a new process
 group, and a continuously drained pipe shared by stdout/stderr. It records the
 shell's actual exit code or signal; tasks and services differ in presentation,
 not automatic restart behavior. There is no PTY or interactive input.
@@ -148,7 +180,8 @@ changing **both** namespaces while running is unsupported.
 
 Config updates affect the next run only. Active removed aliases remain visible
 and stoppable until completion; active moved aliases keep their original kind.
-Every reconnect synchronizes configuration; there is no live watcher.
+Opening a dashboard/headless client synchronizes configuration; there is no live
+watcher. Passive dashboard state polling does not reload configuration.
 
 Latest-run logs live under the project's state directory in `logs/<alias-hash>/`.
 A four-slot file ring caps retained payload at `logs.maxBytes` (default 10 MiB),
@@ -165,8 +198,9 @@ across supervisor replacement. Abrupt loss may discard queued output or leave a
 torn last record, which is reported rather than trusted. Missing/older memory-only
 logs are `unavailable`, never silently substituted from another run.
 
-M5 must sanitize terminal rendering. Noninteractive programs may buffer output;
-Python can use `-u` or `PYTHONUNBUFFERED=1`.
+The dashboard sanitizes terminal rendering without altering retained raw bytes.
+Noninteractive programs may buffer output; Python can use `-u` or
+`PYTHONUNBUFFERED=1`.
 
 Commands that deliberately daemonize or escape their group are outside v1's
 lifecycle guarantees. There are no supervisor-crash, logout, or reboot recovery
@@ -191,7 +225,10 @@ reconnect, private paths, stale sockets, compatibility, config changes, environm
 snapshots, metadata failures, supervisor loss, real controlling-terminal hangup,
 and disk-log reconnect/rotation. Logstore tests cover tiny budgets, huge/partial
 lines, invalid bytes, checksums/torn records, queue overload, ENOSPC/short writes,
-private paths, and bounded indexes. No Flask/Celery installation is required. Test cleanup may force-kill its
-verified fixtures; product Stop/Restart never escalates beyond SIGTERM.
+private paths, and bounded indexes. Dashboard tests cover navigation, async action
+limits, stale reads, sanitization/fuzz seeds, bounded viewports, and real PTY
+keyboard actions, resizing, quit/crash/hangup/signal, and reconnect. No Flask/Celery
+installation is required. Test cleanup may force-kill its verified fixtures;
+product Stop/Restart never escalates beyond SIGTERM.
 The Make targets disable Go's result cache (`-count=1`): subprocess builds can
 change even when the linked test runner itself has not changed.

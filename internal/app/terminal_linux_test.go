@@ -25,6 +25,10 @@ func terminalClient(t *testing.T, root string, args ...string) (*exec.Cmd, *os.F
 		t.Fatalf("M3 terminal-closure gate requires a Linux PTY: %v", err)
 	}
 	master := os.NewFile(uintptr(fd), "PTY master")
+	if err := unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 100}); err != nil {
+		master.Close()
+		t.Fatal(err)
+	}
 	if err := unix.IoctlSetPointerInt(fd, unix.TIOCSPTLCK, 0); err != nil {
 		master.Close()
 		t.Fatal(err)

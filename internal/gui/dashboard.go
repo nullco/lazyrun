@@ -1,0 +1,540 @@
+// Package gui is a client-only dashboard: no rendering context owns processes,
+// signals, capture pipes, or supervisor startup/recovery.
+package gui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jesseduffield/gocui"
+	"lazyrun/internal/model"
+)
+
+// Client is deliberately independent of the runtime and Unix transport.
+type Client interface {
+	State(context.Context) (model.State, error)
+	Start(context.Context, string, []string) (model.Run, error)
+	Stop(context.Context, string) (model.Run, error)
+	Restart(context.Context, string, []string) (model.Run, error)
+	Logs(context.Context, string, string, uint64, int) (model.LogRead, error)
+	TailLogs(context.Context, string, string, int, int) (model.LogRead, error)
+}
+
+type Options struct {
+	Environment []string
+	Version     string
+}
+type pane int
+
+const (
+	projectPane pane = iota
+	servicesPane
+	tasksPane
+	detailPane
+)
+
+var paneNames = []string{"project", "services", "tasks", "detail"}
+
+type event struct {
+	state      *model.State
+	read       *model.LogRead
+	err        error
+	generation uint64
+	initial    bool
+	after      uint64
+	action     string
+	alias      string
+}
+type logJob struct {
+	ctx          context.Context
+	generation   uint64
+	alias, runID string
+	after        uint64
+	tail         int
+	initial      bool
+}
+
+type dashboard struct {
+	client                     Client
+	opts                       Options
+	ctx                        context.Context
+	cancel                     context.CancelFunc
+	workers                    sync.WaitGroup
+	events                     chan event
+	jobs                       chan logJob
+	state                      model.State
+	connected                  bool
+	connectionError            string
+	focus, owner               pane
+	selected                   [4]string
+	tab                        int
+	help                       bool
+	small                      bool
+	busy                       bool
+	notice                     string
+	noticeUntil                time.Time
+	buffer                     logBuffer
+	logAlias, logRun           string
+	logError                   string
+	unavailable                bool
+	loaded                     bool
+	cursor                     uint64
+	generation                 uint64
+	viewCancel                 context.CancelFunc
+	jobActive                  bool
+	follow                     bool
+	top, horizontal, detailTop int
+	helpTop                    int
+}
+
+func newDashboard(ctx context.Context, client Client, state model.State, opts Options) *dashboard {
+	ctx, cancel := context.WithCancel(ctx)
+	d := &dashboard{client: client, opts: opts, ctx: ctx, cancel: cancel,
+		events: make(chan event, 16), jobs: make(chan logJob, 1), state: state,
+		connected: true, focus: projectPane, owner: projectPane, follow: true}
+	d.opts.Environment = append([]string(nil), opts.Environment...)
+	d.reselect()
+	return d
+}
+
+// Run returns after restoring the terminal. Only local readers/requests are
+// canceled on exit; an accepted lifecycle operation remains supervisor-owned.
+func Run(ctx context.Context, client Client, opts Options) error {
+	initialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	state, err := client.State(initialCtx)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("dashboard state: %w", err)
+	}
+	g, err := gocui.NewGui(gocui.NewGuiOpts{OutputMode: gocui.OutputTrue, SupportOverlaps: true})
+	if err != nil {
+		return err
+	}
+	d := newDashboard(ctx, client, state, opts)
+	defer func() { d.cancel(); d.workers.Wait(); g.Close() }()
+	g.Cursor = false
+	g.FrameColor = gocui.ColorDefault
+	g.SelFrameColor = gocui.ColorGreen
+	g.SetManagerFunc(d.layout)
+	if err := d.bindings(g); err != nil {
+		return err
+	}
+	d.spawn(d.pollState)
+	d.spawn(d.pollLogs)
+	// Exactly one outstanding UI wakeup, with an acknowledgement. gocui's
+	// Update otherwise creates a goroutine per call and cannot cancel its queue.
+	d.spawn(func() {
+		defer func() {
+			if d.ctx.Err() != nil {
+				g.UpdateAsync(func(*gocui.Gui) error { return gocui.ErrQuit })
+			}
+		}()
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			ack := make(chan struct{})
+			g.UpdateAsync(func(*gocui.Gui) error { defer close(ack); d.drain(); return nil })
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-ack:
+			}
+		}
+	})
+	err = g.MainLoop()
+	if err == gocui.ErrQuit {
+		return nil
+	}
+	return err
+}
+
+func (d *dashboard) spawn(fn func()) { d.workers.Add(1); go func() { defer d.workers.Done(); fn() }() }
+func (d *dashboard) send(ctx context.Context, e event) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case d.events <- e:
+		return true
+	}
+}
+func wait(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+func (d *dashboard) pollState() {
+	for {
+		ctx, cancel := context.WithTimeout(d.ctx, 2*time.Second)
+		state, err := d.client.State(ctx)
+		cancel()
+		if !d.send(d.ctx, event{state: &state, err: err}) || !wait(d.ctx, 400*time.Millisecond) {
+			return
+		}
+	}
+}
+func (d *dashboard) pollLogs() {
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case job := <-d.jobs:
+			for job.ctx.Err() == nil {
+				ctx, cancel := context.WithTimeout(job.ctx, 2*time.Second)
+				var r model.LogRead
+				var err error
+				if job.initial {
+					r, err = d.client.TailLogs(ctx, job.alias, job.runID, job.tail, 64*1024)
+				} else {
+					r, err = d.client.Logs(ctx, job.alias, job.runID, job.after, 64*1024)
+				}
+				cancel()
+				if !d.send(job.ctx, event{read: &r, err: err, generation: job.generation, initial: job.initial, after: job.after}) {
+					break
+				}
+				if err == nil {
+					job.initial = false
+					job.after = r.Next
+				}
+				if !wait(job.ctx, 200*time.Millisecond) {
+					break
+				}
+			}
+		}
+	}
+}
+func (d *dashboard) drain() {
+	for range cap(d.events) {
+		select {
+		case e := <-d.events:
+			switch {
+			case e.action != "":
+				d.busy = false
+				if e.err != nil {
+					d.notify(e.action + " " + e.alias + ": " + e.err.Error() + "; query state before retrying")
+				} else {
+					d.notify(e.action + " requested for " + e.alias)
+				}
+			case e.state != nil:
+				d.connected = e.err == nil
+				if e.err != nil {
+					d.connectionError = singleLine(e.err.Error())
+				} else {
+					d.connectionError = ""
+					d.state = *e.state
+					d.reselect()
+				}
+			case e.read != nil && e.generation == d.generation:
+				if e.err != nil {
+					d.logError = singleLine(e.err.Error())
+					continue
+				}
+				if e.read.RunID != d.logRun {
+					continue
+				}
+				d.logError = singleLine(e.read.Error)
+				d.unavailable = e.read.Unavailable
+				dropped := d.buffer.consume(*e.read, e.after, e.initial)
+				if item, ok := d.current(); ok && item.Run.Outcome != nil && e.read.Next >= item.Run.LogEnd {
+					if text := d.buffer.filter.Finish(); text != "" {
+						dropped += d.buffer.append([]byte(text), time.Time{})
+					}
+				}
+				if !d.follow {
+					d.top = max(0, d.top-dropped)
+				}
+				d.cursor = e.read.Next
+				d.loaded = true
+			}
+		default:
+			d.syncLogView()
+			return
+		}
+	}
+	d.syncLogView()
+}
+func (d *dashboard) notify(text string) {
+	d.notice = singleLine(text)
+	d.noticeUntil = time.Now().Add(10 * time.Second)
+}
+
+func displayKind(item model.CommandState) model.Kind {
+	if item.Run.Lifecycle.Active() || item.Removed || item.Definition == nil {
+		return item.Run.Definition.Kind
+	}
+	return item.Definition.Kind
+}
+func (d *dashboard) items(p pane) []model.CommandState {
+	kind := model.Service
+	if p == tasksPane {
+		kind = model.Task
+	} else if p != servicesPane {
+		return nil
+	}
+	var result []model.CommandState
+	for _, item := range d.state.Commands {
+		if displayKind(item) == kind {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+func (d *dashboard) reselect() {
+	for _, p := range []pane{servicesPane, tasksPane} {
+		items := d.items(p)
+		found := false
+		for _, item := range items {
+			if item.Run.Definition.Alias == d.selected[p] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			d.selected[p] = ""
+			if len(items) > 0 {
+				d.selected[p] = items[0].Run.Definition.Alias
+			}
+		}
+	}
+}
+func (d *dashboard) current() (model.CommandState, bool) {
+	if d.owner == projectPane {
+		return model.CommandState{}, false
+	}
+	for _, item := range d.items(d.owner) {
+		if item.Run.Definition.Alias == d.selected[d.owner] {
+			return item, true
+		}
+	}
+	return model.CommandState{}, false
+}
+func (d *dashboard) syncLogView() {
+	item, ok := d.current()
+	alias, runID := "", ""
+	if ok {
+		alias, runID = item.Run.Definition.Alias, item.Run.ID
+	}
+	changed := alias != d.logAlias || runID != d.logRun
+	if changed {
+		d.buffer.reset(d.state.Project.Logs.Timestamps)
+		d.logAlias, d.logRun = alias, runID
+		d.logError = ""
+		d.unavailable = false
+		d.loaded = false
+		d.cursor = 0
+		d.follow = true
+		d.top, d.horizontal, d.detailTop = 0, 0, 0
+	}
+	want := ok && runID != "" && d.tab == 0 && !d.small
+	if !changed && want == d.jobActive {
+		return
+	}
+	if d.viewCancel != nil {
+		d.viewCancel()
+		d.viewCancel = nil
+	}
+	d.generation++
+	d.jobActive = want
+	// Coalesce rapid selection changes; the worker never queues view goroutines.
+	select {
+	case <-d.jobs:
+	default:
+	}
+	if want {
+		ctx, cancel := context.WithCancel(d.ctx)
+		d.viewCancel = cancel
+		d.jobs <- logJob{ctx: ctx, generation: d.generation, alias: alias, runID: runID, after: d.cursor, tail: d.state.Project.Logs.Tail, initial: !d.loaded}
+	}
+}
+func (d *dashboard) action(action string) {
+	if d.help || d.small {
+		return
+	}
+	item, ok := d.current()
+	if !ok {
+		d.notify("Select a service or task; project-wide actions are not supported")
+		return
+	}
+	if !d.connected {
+		d.notify("Disconnected: actions disabled; reopen the dashboard if the supervisor was lost")
+		return
+	}
+	if d.busy {
+		d.notify("A lifecycle request is pending; no replacement was queued")
+		return
+	}
+	if item.Removed && action != "stop" {
+		d.notify("Removed from config: only stop is available")
+		return
+	}
+	alias := item.Run.Definition.Alias
+	label := action
+	if displayKind(item) == model.Task {
+		if action == "start" {
+			label = "run"
+		} else if action == "restart" {
+			label = "rerun"
+		}
+	}
+	d.busy = true
+	d.notify(label + " pending for " + alias)
+	d.spawn(func() {
+		ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+		defer cancel()
+		var err error
+		switch action {
+		case "start":
+			_, err = d.client.Start(ctx, alias, d.opts.Environment)
+		case "stop":
+			_, err = d.client.Stop(ctx, alias)
+		case "restart":
+			_, err = d.client.Restart(ctx, alias, d.opts.Environment)
+		}
+		d.send(d.ctx, event{action: label, alias: alias, err: err})
+	})
+}
+
+func (d *dashboard) setFocus(p pane) {
+	d.focus = p
+	if p != detailPane {
+		d.owner = p
+		d.detailTop = 0
+	}
+	d.syncLogView()
+}
+func (d *dashboard) move(delta int) {
+	if d.focus == detailPane {
+		if d.owner != projectPane && d.tab == 0 {
+			d.follow = false
+			d.top = max(0, d.top+delta)
+		} else {
+			d.detailTop = max(0, d.detailTop+delta)
+		}
+		return
+	}
+	items := d.items(d.focus)
+	for i, item := range items {
+		if item.Run.Definition.Alias == d.selected[d.focus] {
+			d.selected[d.focus] = items[max(0, min(len(items)-1, i+delta))].Run.Definition.Alias
+			break
+		}
+	}
+	d.syncLogView()
+}
+func (d *dashboard) bindings(g *gocui.Gui) error {
+	bindings := []struct {
+		key any
+		fn  func()
+	}{
+		{'1', func() { d.setFocus(projectPane) }}, {'2', func() { d.setFocus(servicesPane) }}, {'3', func() { d.setFocus(tasksPane) }},
+		{gocui.KeyTab, func() { d.setFocus((d.focus + 1) % 4) }}, {gocui.KeyBacktab, func() { d.setFocus((d.focus + 3) % 4) }},
+		{gocui.KeyEnter, func() { d.setFocus(detailPane) }}, {gocui.KeyEsc, func() { d.setFocus(d.owner) }},
+		{'j', func() { d.move(1) }}, {'k', func() { d.move(-1) }}, {gocui.KeyArrowDown, func() { d.move(1) }}, {gocui.KeyArrowUp, func() { d.move(-1) }},
+		{gocui.KeyPgdn, func() { d.move(10) }}, {gocui.KeyPgup, func() { d.move(-10) }},
+		{gocui.KeyArrowLeft, func() { d.horizontal = max(0, d.horizontal-10) }}, {gocui.KeyArrowRight, func() { d.horizontal += 10 }},
+		{'[', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }}, {']', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }},
+		{'S', func() { d.action("start") }}, {'s', func() { d.action("stop") }}, {'r', func() { d.action("restart") }},
+		{'G', func() { d.follow = true }},
+	}
+	for _, binding := range bindings {
+		fn := binding.fn
+		if err := g.SetKeybinding("", binding.key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
+			if d.help {
+				switch binding.key {
+				case gocui.KeyEsc:
+					d.help = false
+				case 'j', gocui.KeyArrowDown, gocui.KeyPgdn:
+					d.helpTop++
+				case 'k', gocui.KeyArrowUp, gocui.KeyPgup:
+					d.helpTop = max(0, d.helpTop-1)
+				}
+				return nil
+			}
+			if !d.small {
+				fn()
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	for _, key := range []any{'q', gocui.KeyCtrlC} {
+		if err := g.SetKeybinding("", key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error { return gocui.ErrQuit }); err != nil {
+			return err
+		}
+	}
+	return g.SetKeybinding("", '?', gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
+		if !d.small {
+			d.help = !d.help
+		}
+		return nil
+	})
+}
+
+func outcome(r model.Run) string {
+	text := r.Label()
+	if r.Outcome != nil {
+		switch {
+		case r.Outcome.ExitCode != nil:
+			text += fmt.Sprintf(" (%d)", *r.Outcome.ExitCode)
+		case r.Outcome.Signal != 0:
+			text += fmt.Sprintf(" (signal %d)", r.Outcome.Signal)
+		}
+	}
+	return singleLine(text)
+}
+func itemLabel(item model.CommandState) string {
+	text := singleLine(item.Run.Definition.Alias) + "  " + outcome(item.Run)
+	if item.Removed {
+		text += " [removed from config]"
+	} else if item.Definition != nil && item.Definition.Kind != item.Run.Definition.Kind && item.Run.Lifecycle.Active() {
+		text += " [moved in config]"
+	}
+	if item.Run.Error != "" || item.Run.MetadataError != "" || item.Run.LogError != "" {
+		text += " !"
+	}
+	return text
+}
+func projectDetails(s model.State, connection, version string) string {
+	p := s.Project
+	return fmt.Sprintf("%s\n\nRoot: %s\nConfig: %s\nProject ID: %s\nShell: %s\nConnection: %s\nVersion: %s\n\n%d configured services, %d configured tasks\nLog retention: %d bytes per latest run\nInitial tail: %d lines; timestamps: %t\n\nOpening this dashboard starts nothing.\nSelect a service or task for Logs / Details.\nQuitting leaves commands running.\nNo project-wide lifecycle action or log stream.\nConfig is synchronized when opening/reopening.\nNo automatic restart or force-kill.", singleLine(p.Name), singleLine(p.Root), singleLine(p.ConfigPath), singleLine(p.ID), singleLine(p.Shell), singleLine(connection), singleLine(version), len(p.Services), len(p.Tasks), p.Logs.MaxBytes, p.Logs.Tail, p.Logs.Timestamps)
+}
+func commandDetails(item model.CommandState) string {
+	r := item.Run
+	var out strings.Builder
+	fmt.Fprintf(&out, "Alias: %s\nKind: %s\nStatus: %s\nRun ID: %s\nPID: %d  PGID: %d\nStop requested: %t\n", singleLine(r.Definition.Alias), singleLine(string(r.Definition.Kind)), outcome(r), singleLine(r.ID), r.Identity.PID, r.Identity.PGID, r.StopRequested)
+	if !r.StartedAt.IsZero() {
+		fmt.Fprintf(&out, "Started: %s\n", r.StartedAt.Format(time.RFC3339))
+	}
+	if r.EndedAt != nil {
+		fmt.Fprintf(&out, "Ended: %s\n", r.EndedAt.Format(time.RFC3339))
+	}
+	fmt.Fprintf(&out, "\n%s definition:\nShell: %s\nWorking directory: %s\nCommand:\n%s\n", map[bool]string{true: "Latest run", false: "Configured"}[r.ID != ""], singleLine(r.Shell), singleLine(r.Definition.Cwd), plain(r.Definition.Command))
+	if item.Removed {
+		out.WriteString("\nRemoved from config; retained while active. Only stop is available.\n")
+	}
+	if item.Definition != nil && (item.Definition.Kind != r.Definition.Kind || item.Definition.Command != r.Definition.Command || item.Definition.Cwd != r.Definition.Cwd) {
+		fmt.Fprintf(&out, "\nCurrent configuration (next run only):\nKind: %s\nWorking directory: %s\nCommand:\n%s\n", singleLine(string(item.Definition.Kind)), singleLine(item.Definition.Cwd), plain(item.Definition.Command))
+	}
+	for _, e := range []struct{ label, text string }{{"Run error", r.Error}, {"Metadata error", r.MetadataError}, {"Log error", r.LogError}} {
+		if e.text != "" {
+			fmt.Fprintf(&out, "\n%s: %s\n", e.label, plain(e.text))
+		}
+	}
+	if r.Outcome != nil && r.Outcome.Error != "" {
+		fmt.Fprintf(&out, "\nOutcome: %s: %s\n", singleLine(string(r.Outcome.Kind)), plain(r.Outcome.Error))
+	}
+	return out.String()
+}

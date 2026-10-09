@@ -1,5 +1,4 @@
-// lazyrun's dashboard is still in progress. The headless CLI exercises the same
-// detached supervisor/client path that will back the TUI.
+// lazyrun opens a client-only dashboard; explicit flags provide headless actions.
 package main
 
 import (
@@ -12,7 +11,9 @@ import (
 	"syscall"
 
 	"github.com/integrii/flaggy"
+	"golang.org/x/term"
 	"lazyrun/internal/app"
+	"lazyrun/internal/gui"
 	"lazyrun/internal/model"
 	"lazyrun/internal/supervisor"
 )
@@ -37,7 +38,7 @@ func main() {
 
 func run() error {
 	parser := flaggy.NewParser("lazyrun")
-	parser.Description = "A Linux-first project command dashboard (headless client available; TUI in progress)."
+	parser.Description = "A Linux-first project command dashboard with detached supervision."
 	parser.Version = version
 	parser.ShowCompletion = false
 	var check, state bool
@@ -45,7 +46,7 @@ func run() error {
 	var afterValues []string
 	var tailValues []int
 	parser.Bool(&check, "", "check", "Validate configuration only; do not launch the supervisor")
-	parser.Bool(&state, "", "state", "Connect/synchronize and print project state as JSON (default until TUI)")
+	parser.Bool(&state, "", "state", "Connect/synchronize and print project state as JSON")
 	parser.String(&start, "", "start", "Start a configured alias; commands survive client exit")
 	parser.String(&stop, "", "stop", "Gracefully stop an alias's owned process group")
 	parser.String(&restart, "", "restart", "Gracefully restart/rerun an alias using this environment")
@@ -94,6 +95,9 @@ func run() error {
 	if check {
 		return app.Check(dir, os.Stdout)
 	}
+	if actions == 0 && (!term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd()))) {
+		return fmt.Errorf("dashboard requires a terminal; use --state for JSON or --check to validate configuration")
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	connection, err := app.Connect(ctx, dir, supervisor.LaunchOptions{})
@@ -101,6 +105,9 @@ func run() error {
 		return err
 	}
 	defer connection.Close()
+	if actions == 0 {
+		return gui.Run(ctx, connection.Client, gui.Options{Environment: os.Environ(), Version: version})
+	}
 	var result any
 	switch {
 	case start != "":
