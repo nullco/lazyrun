@@ -23,9 +23,9 @@ func geometry(width, height int) map[string]rectangle {
 	}
 	left := max(24, min(42, width/3))
 	bottom := height - 4 // one notification row and two footer rows
-	// Framed coordinates include their borders: a two-cell separation leaves
-	// one blank row/column between panes rather than a shared border.
-	const separation = 2
+	// Framed coordinates include their borders. Adjacent border cells keep
+	// each pane distinct without an extra blank row or column.
+	const separation = 1
 	projectEnd := 4 // three content rows: name, root, connection
 	servicesStart := projectEnd + separation
 	servicesEnd := servicesStart + (bottom-servicesStart-separation)/2
@@ -46,6 +46,9 @@ func view(g *gocui.Gui, name, title string, r rectangle, frame bool) (*gocui.Vie
 		return nil, err
 	}
 	v.Frame = frame
+	if frame {
+		v.FrameRunes = []rune{'─', '│', '╭', '╮', '╰', '╯'}
+	}
 	v.Title = title
 	v.Wrap = false
 	v.Autoscroll = false

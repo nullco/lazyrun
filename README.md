@@ -77,8 +77,9 @@ environments. Reopen to synchronize config edits; there is no file watcher.
 Lifecycle requests are asynchronous and never implicitly retried or queued by
 repeated keypresses. Notifications do not block navigation; the latest is also
 readable in Details. Minimum dashboard size is 70 columns by 18 rows. Keyboard
-and mouse navigation are supported. A green border/title
-marks the focused pane; its selected command has a full-width blue highlight.
+and mouse navigation are supported. Panes use rounded borders with no extra
+blank rows/columns between them. A green border/title marks the focused pane;
+its selected command has a full-width blue highlight.
 Statuses use green for running/completed, yellow for transitions/stops, red for
 failures/warnings, and cyan for naturally exited services. Text labels and the
 `>` selection marker remain visible independently of color.

@@ -7,18 +7,18 @@ import (
 	"github.com/jesseduffield/gocui"
 )
 
-func TestGeometryLeavesBlankRowsAndColumnBetweenPanes(t *testing.T) {
+func TestGeometryKeepsSeparateAdjacentBordersWithoutBlankGaps(t *testing.T) {
 	for width := MinWidth; width <= 200; width++ {
 		for height := MinHeight; height <= 65; height++ {
 			areas := geometry(width, height)
 			project, services, tasks, detail := areas["project"], areas["services"], areas["tasks"], areas["detail"]
-			if services.y0-project.y1-1 != 1 || tasks.y0-services.y1-1 != 1 {
-				t.Fatalf("%dx%d: missing blank rows: %+v", width, height, areas)
+			if services.y0-project.y1 != 1 || tasks.y0-services.y1 != 1 {
+				t.Fatalf("%dx%d: pane borders are shared or have a blank row: %+v", width, height, areas)
 			}
 			for _, name := range []string{"project", "services", "tasks"} {
 				r := areas[name]
-				if detail.x0-r.x1-1 != 1 {
-					t.Fatalf("%dx%d: missing blank column beside %s: %+v", width, height, name, areas)
+				if detail.x0-r.x1 != 1 {
+					t.Fatalf("%dx%d: borders are shared or have a blank column beside %s: %+v", width, height, name, areas)
 				}
 			}
 			for _, name := range []string{"project", "services", "tasks", "detail"} {
@@ -34,7 +34,7 @@ func TestGeometryLeavesBlankRowsAndColumnBetweenPanes(t *testing.T) {
 	}
 }
 
-func TestHeadlessLayoutAppliesPaneMarginsAtMinimumAndLargerSizes(t *testing.T) {
+func TestHeadlessLayoutAppliesCompactRoundedPanesAtMinimumAndLargerSizes(t *testing.T) {
 	for _, size := range [][2]int{{MinWidth, MinHeight}, {100, 30}, {180, 50}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: size[0], Height: size[1], OutputMode: gocui.OutputTrue, SupportOverlaps: true})
@@ -49,7 +49,7 @@ func TestHeadlessLayoutAppliesPaneMarginsAtMinimumAndLargerSizes(t *testing.T) {
 					t.Fatal(err)
 				}
 				if d.small {
-					t.Fatal("margins made a supported terminal too small")
+					t.Fatal("compact layout made a supported terminal too small")
 				}
 				for name, want := range geometry(size[0], size[1]) {
 					x0, y0, x1, y1, err := g.ViewPosition(name)
@@ -58,6 +58,10 @@ func TestHeadlessLayoutAppliesPaneMarginsAtMinimumAndLargerSizes(t *testing.T) {
 					}
 					if got := (rectangle{x0, y0, x1, y1}); got != want {
 						t.Fatalf("%s position: %+v != %+v", name, got, want)
+					}
+					v, _ := g.View(name)
+					if v.Frame && string(v.FrameRunes) != "─│╭╮╰╯" {
+						t.Fatalf("%s did not use rounded borders: %q", name, string(v.FrameRunes))
 					}
 				}
 			}

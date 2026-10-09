@@ -91,6 +91,18 @@ func TestRenderedThemeTracksFocusSelectionAndHelp(t *testing.T) {
 			t.Fatalf("cell %d,%d: fg=%#x bg=%#x; want fg=%#x bg=%#x", x, y, fg.Hex(), bg.Hex(), foreground.Hex(), background.Hex())
 		}
 	}
+	checkRoundedCorners := func(r rectangle) {
+		t.Helper()
+		for _, corner := range []struct {
+			x, y int
+			want rune
+		}{{r.x0, r.y0, '╭'}, {r.x1, r.y0, '╮'}, {r.x0, r.y1, '╰'}, {r.x1, r.y1, '╯'}} {
+			got, _, _, _ := gocui.Screen.GetContent(corner.x, corner.y)
+			if got != corner.want {
+				t.Fatalf("corner %d,%d: %q != %q", corner.x, corner.y, got, corner.want)
+			}
+		}
+	}
 	step := 0
 	g.SetManagerFunc(func(g *gocui.Gui) error {
 		// This manager runs before drawing. Check the previous completed frame,
@@ -99,6 +111,7 @@ func TestRenderedThemeTracksFocusSelectionAndHelp(t *testing.T) {
 			frame := frames[step-1]
 			areas := geometry(100, 30)
 			if frame.help {
+				checkRoundedCorners(rectangle{2, 1, 97, 28})
 				checkCell(2, 3, g.SelFrameColor, gocui.ColorDefault)
 				if g.CurrentView().Name() != "help" {
 					t.Fatal("help did not take focus")
@@ -110,6 +123,7 @@ func TestRenderedThemeTracksFocusSelectionAndHelp(t *testing.T) {
 					if name == paneNames[frame.focus] {
 						color = g.SelFrameColor
 					}
+					checkRoundedCorners(r)
 					checkCell(r.x0, r.y0+1, color, gocui.ColorDefault)
 				}
 				// Unselected/cached rows must retain status colors rather than

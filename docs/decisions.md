@@ -251,8 +251,9 @@ Its tcell backend supports simulation tests and true-color cells. The layout,
 controller and filter are original code; no lazydocker implementation was copied.
 No Docker/lazycore dependencies were added.
 
-Visual feedback adds one empty row between the stacked panes and one empty column
-before Logs/Details, without raising the 70×18 minimum. Enable gocui's GUI-level
+Panes have separate adjacent borders, without extra blank rows/columns between
+stacked panes or before Logs/Details. Rounded Unicode corners use gocui's
+`FrameRunes`; the 70×18 minimum remains unchanged. Enable gocui's GUI-level
 `Highlight` (required for `SelFrameColor`) for a green focused frame/title. The
 focused command list uses a cursor-aligned, full-width white-on-blue selection;
 unfocused lists keep the `>` marker and original status colors. Lifecycle/outcome
@@ -265,7 +266,7 @@ Mouse reporting is enabled through the same gocui/tcell backend. Left click only
 focuses a pane/selects a displayed command; lifecycle operations stay on explicit
 keyboard actions. A bounded last-rendered alias map resolves scrolled row hits
 without using a potentially reordered state snapshot. Borders/blank rows focus
-without selecting, and gaps/footer do nothing. Help/minimum-size guards block
+without selecting, and the footer does nothing. Help/minimum-size guards block
 underlying navigation. The wheel targets the hovered pane and shares keyboard
 scroll/follow behavior. Unit tests and actual SGR reports through a real PTY
 verify selection, focus, wheel, modal blocking and keyboard action targeting.
