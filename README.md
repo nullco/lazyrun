@@ -228,6 +228,10 @@ Celery prefork tasks can be interrupted by process-group SIGTERM**, even when th
 parent reports warm shutdown; test your exact pool/task configuration. See the
 [smoke findings and setup](examples/smoke/README.md).
 
+## License
+
+[MIT](LICENSE). Bundled dependencies retain their own licenses and notices.
+
 ## Development
 
 ```sh

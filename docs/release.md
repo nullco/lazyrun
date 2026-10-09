@@ -60,16 +60,16 @@ make release VERSION=v0.1.0-rc.1
 packager disables build VCS metadata, strips local source paths, normalizes
 archive timestamps/owners/modes, and includes only an explicit documentation/
 example allowlist (no local venvs, brokers, task artifacts or secrets). Bundled
-Go runtime and linked module license/NOTICE texts are retained under `third-party/`.
-Two builds
-from the same inputs, toolchain and version should yield identical tarballs.
+lazyrun's [MIT license](../LICENSE) is included as `LICENSE`; Go runtime and linked
+module license/NOTICE texts are retained under `third-party/`. Two builds from the
+same inputs, toolchain and version should yield identical tarballs.
 Checksums detect accidental changes; they are not signatures or proof of trust.
 
 Before publishing:
 
 - Review the working tree, choose the release version/tag and pass all gates.
-- Choose a repository license; none is silently granted by this implementation.
-  Review the bundled dependency notices and any additional distribution obligations.
+- Verify the MIT `LICENSE` is included and review bundled dependency notices and
+  any additional distribution obligations.
 - Test the native arm64 runtime before claiming native arm64 validation.
 - Inspect/extract the archives, run the native binary's `--version` / `--check`,
   and verify checksums. Never distribute a dirty/unreviewed build as a final tag.

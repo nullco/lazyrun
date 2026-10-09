@@ -273,8 +273,9 @@ remains the compatibility authority. Static CGO-disabled Linux amd64/arm64
 packages use trimmed paths, disabled build VCS data, normalized archives and
 checksums, retaining Go/dependency license and NOTICE texts. An explicit source
 allowlist excludes local venvs/brokers/artifacts.
-Publication/tagging/licensing and native arm64 validation remain deliberate owner
-steps, not side effects of packaging or CI.
+The repository owner chose MIT for lazyrun; release archives include `LICENSE`
+alongside dependency notices. Publication/tagging and native arm64 validation
+remain deliberate owner steps, not side effects of packaging or CI.
 
 Opt-in smoke tests use pinned Python 3.12 packages, the real Werkzeug stat
 reloader, and real Celery prefork/threads workers with Kombu filesystem transport.

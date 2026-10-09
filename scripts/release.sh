@@ -14,15 +14,14 @@ trap 'rm -rf -- "$stage"' EXIT
 mkdir -p dist
 # Explicit allowlist: do not copy local venvs, brokers, bytecode or secrets.
 mkdir -p "$stage/docs" "$stage/examples/flask" "$stage/examples/smoke"
-cp README.md "$stage/"
+cp README.md LICENSE "$stage/"
 cp docs/{decisions.md,troubleshooting.md,release.md} "$stage/docs/"
 cp examples/flask/lazyrun.yml "$stage/examples/flask/"
 cp examples/smoke/{README.md,lazyrun.yml,smoke_app.py,requirements.txt} "$stage/examples/smoke/"
-chmod 0644 "$stage/README.md" "$stage/docs/"*.md "$stage/examples/"*/*
+chmod 0644 "$stage/README.md" "$stage/LICENSE" "$stage/docs/"*.md "$stage/examples/"*/*
 chmod 0755 "$stage/docs" "$stage/examples" "$stage/examples/"*
 
-# Bundled static dependencies retain their license/NOTICE texts. Do not grant
-# a license to lazyrun itself; that is a separate repository-owner decision.
+# Dependencies retain their own license/NOTICE texts alongside lazyrun's MIT license.
 mkdir -p "$stage/third-party"
 cp "$(go env GOROOT)/LICENSE" "$stage/third-party/Go-LICENSE"
 printf 'Go runtime: %s\nLinked module license/NOTICE texts:\n' "$(go env GOVERSION)" > "$stage/third-party/README.txt"
@@ -55,7 +54,7 @@ for arch in amd64 arm64; do
     -ldflags "-s -w -X main.version=$version" -o "$stage/lazyrun" ./cmd/lazyrun
   chmod 0755 "$stage/lazyrun"
   tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-    -cf - -C "$stage" lazyrun README.md docs examples third-party \
+    -cf - -C "$stage" lazyrun README.md LICENSE docs examples third-party \
     | gzip -n > "dist/lazyrun_${version}_linux_${arch}.tar.gz"
 done
 (
