@@ -245,9 +245,37 @@ func TestRepeatedLogReflowPreservesColumnUntilScrolling(t *testing.T) {
 	}
 }
 
+func TestWrappedTabsPreserveExpandedTextAndTail(t *testing.T) {
+	for _, tabs := range []int{1024, 1025, 2044} {
+		raw := strings.Repeat("\t", tabs) + "tail"
+		want := strings.Repeat("    ", tabs) + "tail"
+		var filter Sanitizer
+		text := filter.Feed([]byte(raw)) + filter.Finish()
+		for _, width := range []int{2, 6, 38, 64, 80} {
+			line := logLine{text: text}
+			w := line.wrapped(width)
+			var all strings.Builder
+			for _, row := range w.visible(0, w.rows, "") {
+				all.WriteString(plain(row.text))
+			}
+			if all.String() != want || w.rows != (len(want)+width-1)/width {
+				t.Fatalf("expanded tabs lost text: tabs=%d width=%d rows=%d gotBytes=%d wantBytes=%d", tabs, width, w.rows, all.Len(), len(want))
+			}
+			var tail strings.Builder
+			for _, row := range w.visible(w.rows-2, 2, "") {
+				tail.WriteString(plain(row.text))
+			}
+			if tail.String() != want[(w.rows-2)*width:] {
+				t.Fatal("sparse tail viewport did not preserve the expanded line suffix", tabs, width)
+			}
+		}
+	}
+}
+
 func FuzzWrappedViewport(f *testing.F) {
 	f.Add("abc界e\u0301\x1b[31mdefgh", uint8(4), uint16(1))
 	f.Add("a"+strings.Repeat("\u0301", 10)+"bc", uint8(2), uint16(0))
+	f.Add(strings.Repeat("\t", 1025)+"tail", uint8(4), uint16(1))
 	f.Fuzz(func(t *testing.T, raw string, size uint8, offset uint16) {
 		if len(raw) > 2048 {
 			return
@@ -266,8 +294,11 @@ func FuzzWrappedViewport(f *testing.F) {
 					t.Fatal("unbounded wrapped row", row.text, width)
 				}
 			}
-			if all.String() != plain(crop(part, "", 0, 4096)) {
-				t.Fatal("wrapping lost or duplicated text", part, all.String())
+			// Tabs expand during sanitization, so raw inputs below 2 KiB can
+			// exceed 4096 display columns. The sanitized byte length is an upper
+			// bound on cell width; crop only applies intentional cluster limits.
+			if want := plain(crop(part, "", 0, len(part))); all.String() != want {
+				t.Fatalf("wrapping lost or duplicated text: width=%d raw=%q sanitized=%q got=%q want=%q", width, raw, part, all.String(), want)
 			}
 			row := int(offset) % w.rows
 			if len(w.visible(row, 5, "abc")) > 5 || w.point(row).row != row {
