@@ -44,9 +44,12 @@ or loss removed the original beginning; there is nothing earlier to load.
 
 Focus the selected command's **Logs pane** first (Enter or click inside Logs).
 Only there does `/` open a literal, case-sensitive search across all retained
-output of the selected latest run. The prompt stays inside Logs. Enter submits;
-`n`/`N` navigate highlighted matches, Esc clears/cancels, and `G` returns to live
-follow. Project, Services, Tasks and Details do not handle these log-search keys.
+output of the selected latest run. A borderless `Filter:` input replaces the
+bottom shortcuts while editing; it targets the pane that opened it, not all
+panes. Logs still highlight/jump rather than hide nonmatching lines. Enter
+submits; `n`/`N` navigate highlighted matches, Esc clears/cancels, and `G` returns
+to live follow. Project, Services, Tasks and Details do not handle these log-search
+keys.
 Leaving Logs cancels in-flight searches; completed results remain available when
 returning to the same command's Logs. Search ignores ANSI/control strings
 and UI timestamps, expands tabs, and replaces invalid UTF-8 like the dashboard.

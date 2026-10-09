@@ -242,7 +242,9 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 			actions = "s stop (removed from config)"
 		}
 	}
-	putLines(v, textLines("1 Project | 2 Services | 3 Tasks | Tab focus | ? help | q quit\n"+actions+" | Enter details | [ ] tabs | G follow"), 0, 0)
+	if !d.searchEditing {
+		putLines(v, textLines("1 Project | 2 Services | 3 Tasks | Tab focus | ? help | q quit\n"+actions+" | Enter details | [ ] tabs | G follow"), 0, 0)
+	}
 	if d.help {
 		v, err := view(g, "help", "Help - j/k scroll; Esc / ? closes", rectangle{2, 1, width - 3, height - 2}, true)
 		if err != nil {
@@ -258,17 +260,21 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	}
 	_ = g.DeleteView("help")
 	if d.searchEditing {
-		r := areas["detail"]
-		v, err := view(g, "search", "Search logs — Enter / Esc", rectangle{r.x0 + 1, r.y1 - 3, r.x1 - 1, r.y1 - 1}, true)
+		// Shared footer presentation; the editor still belongs to the pane that
+		// opened it. Other pane filters can reuse this surface later.
+		v, err := view(g, "search", "", rectangle{-1, height - 2, width, height}, false)
 		if err != nil {
 			return err
 		}
 		v.Editable = true
 		v.Editor = searchEditor{d: d, g: g}
+		const label = "Filter: "
 		innerWidth, _ := v.Size()
-		offset := max(0, runewidth.StringWidth(d.searchDraft)-innerWidth+1)
-		fmt.Fprint(v, crop(d.searchDraft, "", offset, innerWidth))
-		_ = v.SetCursor(min(innerWidth-1, runewidth.StringWidth(d.searchDraft)), 0)
+		available := innerWidth - len(label)
+		draftWidth := runewidth.StringWidth(d.searchDraft)
+		offset := max(0, draftWidth-available+1)
+		fmt.Fprint(v, label, crop(d.searchDraft, "", offset, available))
+		_ = v.SetCursor(len(label)+min(available-1, draftWidth-offset), 0)
 		_, _ = g.SetViewOnTop("search")
 		g.Cursor = true
 		_, err = g.SetCurrentView("search")

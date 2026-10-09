@@ -190,7 +190,7 @@ func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	keys(t, master, "G") // G clears search and returns to a fresh live tail
 	eventuallyIntegration(t, func() bool { return out.contains("LATE needle") })
 	keys(t, master, "/qSsrneedle") // editing must not quit or execute lifecycle hotkeys
-	eventuallyIntegration(t, func() bool { return out.contains("Search logs") })
+	eventuallyIntegration(t, func() bool { return out.contains("Filter:") })
 	if findRun(f.state(), "archive").ID != run.ID {
 		t.Fatal("search editing reran the command")
 	}

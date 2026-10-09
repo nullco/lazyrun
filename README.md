@@ -64,8 +64,10 @@ verified Linux archive workflow.
   of **all retained output for the selected run**, not just the loaded tail.
   Enter searches; `n` / `N` jump to next / previous matches. Esc clears/cancels;
   `G` exits search and follows. Other panes do not handle log-search keys.
-  The prompt stays inside Logs; Esc / Ctrl-C cancels and lifecycle/quit letters
-  are text. Leaving Logs cancels in-flight search requests.
+  While editing, a borderless `Filter:` input replaces the bottom shortcuts.
+  It still targets only Logs: search highlights/jumps rather than hiding lines.
+  Esc / Ctrl-C cancels and lifecycle/quit letters are text. Leaving Logs cancels
+  in-flight search requests.
 - `?`: contextual help; `q` / `Ctrl-C`: quit the dashboard, **not commands**.
 
 Commands retain their configured order. Active removed/moved aliases remain

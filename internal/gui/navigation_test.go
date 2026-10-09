@@ -68,7 +68,7 @@ func TestLogSearchShortcutsOnlyAffectFocusedLogs(t *testing.T) {
 	}
 }
 
-func TestLogSearchPromptStaysInsideLogPaneAndStatusIsLocal(t *testing.T) {
+func TestLogSearchUsesGenericFooterInputAndStatusIsLocal(t *testing.T) {
 	for _, size := range [][2]int{{MinWidth, MinHeight}, {100, 30}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: size[0], Height: size[1], OutputMode: gocui.OutputTrue, SupportOverlaps: true})
@@ -86,10 +86,36 @@ func TestLogSearchPromptStaysInsideLogPaneAndStatusIsLocal(t *testing.T) {
 				t.Fatal(err)
 			}
 			log := geometry(size[0], size[1])["detail"]
-			if x0 <= log.x0 || x1 >= log.x1 || y0 <= log.y0 || y1 >= log.y1 {
-				t.Fatal("log search prompt covered another pane", x0, y0, x1, y1, log)
+			if x0 != -1 || x1 != size[0] || y0 != size[1]-2 || y1 != size[1] || y0 < log.y1 {
+				t.Fatal("input did not stay in the full-width bottom row", x0, y0, x1, y1, log)
 			}
-			d.searchKey(gocui.KeyEsc)
+			for _, draft := range []string{"", "needle", strings.Repeat("x", 252) + "TAIL", strings.Repeat("界", 80) + "TAIL", strings.Repeat("e\u0301", 80) + "TAIL"} {
+				d.searchDraft = draft
+				if err := d.layout(g); err != nil {
+					t.Fatal(err)
+				}
+				input, _ := g.View("search")
+				footer, _ := g.View("footer")
+				x, y := input.Cursor()
+				if input.Frame || input.Title != "" || !strings.HasPrefix(input.Buffer(), "Filter: ") || strings.Contains(input.Buffer(), "Logs") || strings.TrimSpace(footer.Buffer()) != "" {
+					t.Fatal("input was not a generic borderless footer", input.Buffer(), footer.Buffer())
+				}
+				if x < len("Filter: ") || x >= size[0] || y != 0 || !g.Cursor || g.CurrentView().Name() != "search" || d.focus != detailPane {
+					t.Fatal("input cursor or target pane changed", x, y)
+				}
+				if strings.HasSuffix(draft, "TAIL") && !strings.Contains(input.Buffer(), "TAIL") {
+					t.Fatal("long input hid the typed suffix", input.Buffer())
+				}
+			}
+			input, _ := g.View("search")
+			input.Editor.Edit(input, gocui.KeyEsc, 0, gocui.ModNone)
+			if err := d.layout(g); err != nil {
+				t.Fatal(err)
+			}
+			footer, _ := g.View("footer")
+			if _, err := g.View("search"); err == nil || g.Cursor || g.CurrentView().Name() != "detail" || !strings.Contains(footer.Buffer(), "Tab focus") {
+				t.Fatal("cancel did not restore the footer and owning pane", footer.Buffer())
+			}
 			d.searchQuery = "saved"
 			d.matchIndex = 0
 			d.setFocus(servicesPane)

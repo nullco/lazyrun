@@ -231,12 +231,15 @@ bounded disk read may finish. Filesystem stalls retain the existing IO caveat.
 One coalesced search worker and one coalesced log/window worker use request
 contexts, generations, run IDs and the bounded UI mailbox. Alias/run changes,
 Details/minimum-size modes and quit cancel local requests; never capture or
-supervision. Log-search shortcuts are view-bound and require the focused command Logs tab,
-not merely a selected command: Project, Services, Tasks and Details cannot open,
-navigate or clear log search. Leaving Logs cancels in-flight search and pending
+supervision. Log-search shortcuts are view-bound and require the focused command
+Logs tab, not merely a selected command: Project, Services, Tasks and Details
+cannot open, navigate or clear log search. Leaving Logs cancels in-flight search and pending
 match-window requests, while completed results remain local to the same run.
-An editable, byte-bounded prompt inside Logs consumes lifecycle/quit letters as
-text. Highlighting runs only on viewport text with bounded adjacent context
+An editable, byte-bounded, borderless `Filter:` prompt uses the full-width bottom
+row and hides footer shortcuts while editing. This presentation can serve future
+pane filters, but currently only Logs can open it, with highlight/jump semantics
+rather than hidden nonmatching lines. It consumes lifecycle/quit letters as text.
+Highlighting runs only on viewport text with bounded adjacent context
 (for matches spanning soft wraps), restores application styles afterwards, and
 never expands an entire long line into styled cells.
 
