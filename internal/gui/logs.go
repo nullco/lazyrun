@@ -17,6 +17,7 @@ const (
 type logLine struct {
 	text, prefix string
 	cursor       uint64
+	wrap         *wrappedLayout
 }
 type logBuffer struct {
 	lines      []logLine

@@ -34,6 +34,7 @@ stress:
 
 fuzz:
 	go test ./internal/gui -run '^$$' -fuzz '^FuzzSanitizer$$' -fuzztime=30s -parallel=4
+	go test ./internal/gui -run '^$$' -fuzz '^FuzzWrappedViewport$$' -fuzztime=30s -parallel=4
 	go test ./internal/gui -run '^$$' -fuzz '^FuzzSearchAgreesWithTerminalSanitizer$$' -fuzztime=30s -parallel=4
 	go test ./internal/logsearch -run '^$$' -fuzz '^FuzzSearchContinuations$$' -fuzztime=30s -parallel=4
 

@@ -277,6 +277,9 @@ func (d *dashboard) drain() {
 					}
 				}
 				if !d.follow {
+					if dropped > d.top {
+						d.wrapTop = 0
+					}
 					d.top = max(0, d.top-dropped)
 				}
 				d.cursor = e.read.Next
@@ -361,11 +364,17 @@ func (d *dashboard) syncLogView() {
 		d.loaded = false
 		d.cursor = 0
 		d.follow = true
-		d.top, d.horizontal, d.detailTop = 0, 0, 0
+		d.top, d.wrapTop, d.horizontal, d.detailTop = 0, 0, 0, 0
 	}
-	if (d.tab != 0 || d.small) && (d.searchBusy || d.searchEditing) {
-		d.cancelSearch()
-		d.searchEditing = false
+	if !d.logPaneFocused() {
+		if d.searchBusy || d.searchEditing {
+			d.cancelSearch()
+			d.searchEditing = false
+		}
+		if d.windowBusy && d.wrapTarget != nil {
+			d.cancelWindow()
+			d.wrapTarget = nil
+		}
 	}
 	want := ok && runID != "" && d.tab == 0 && !d.small && !d.history
 	if d.history && !changed {
@@ -479,7 +488,7 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 		{gocui.KeyEnter, func() { d.setFocus(detailPane) }}, {gocui.KeyEsc, func() { d.setFocus(d.owner) }},
 		{'j', func() { d.move(1) }}, {'k', func() { d.move(-1) }}, {gocui.KeyArrowDown, func() { d.move(1) }}, {gocui.KeyArrowUp, func() { d.move(-1) }},
 		{gocui.KeyPgdn, func() { d.move(10) }}, {gocui.KeyPgup, func() { d.move(-10) }},
-		{gocui.KeyArrowLeft, func() { d.horizontal = max(0, d.horizontal-10) }}, {gocui.KeyArrowRight, func() { d.horizontal += 10 }},
+		{gocui.KeyArrowLeft, func() { d.scrollHorizontal(-10) }}, {gocui.KeyArrowRight, func() { d.scrollHorizontal(10) }},
 		{'[', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }}, {']', func() { d.tab = (d.tab + 1) % 2; d.detailTop = 0; d.syncLogView() }},
 		{'S', func() { d.action("start") }}, {'s', func() { d.action("stop") }}, {'r', func() { d.action("restart") }},
 		{'G', d.goFollow}, {gocui.KeyHome, d.goHome},
@@ -488,13 +497,17 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 	}
 	for _, binding := range bindings {
 		fn := binding.fn
-		if err := g.SetKeybinding("", binding.key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
+		viewName := ""
+		switch binding.key {
+		case '/', 'n', 'N', 'G', gocui.KeyHome:
+			viewName = "detail" // reserve other panes for their own future filters
+		}
+		if err := g.SetKeybinding(viewName, binding.key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
 			if d.searchEditing {
 				d.searchKey(binding.key)
 				return nil
 			}
-			if binding.key == gocui.KeyEsc && d.searchQuery != "" && !d.help {
-				d.clearSearch()
+			if binding.key == gocui.KeyEsc && d.clearFocusedSearch() {
 				return nil
 			}
 			if d.help {

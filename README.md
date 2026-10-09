@@ -53,16 +53,19 @@ verified Linux archive workflow.
 - `Tab` / `Shift-Tab`: cycle panes; `Enter` focuses details, `Esc` returns.
 - `[` / `]`: Logs / Details. Project selection shows only project details.
 - `S`: start service / run task; `s`: SIGTERM stop; `r`: restart / rerun.
-- In focused logs, `j/k`, arrows, or `PgUp/PgDn` scroll and pause following;
-  `G` resumes. Older output pages in as you reach the top; `Home` jumps to the
-  earliest retained output. Left/Right scroll sideways through long lines.
+- Logs wrap to the pane width. In focused logs, `j/k`, Up/Down, or
+  `PgUp/PgDn` scroll wrapped rows and pause following; `G` resumes. Older output
+  pages in as you reach the top; `Home` jumps to the earliest retained output.
+  Left/Right scroll Details sideways.
 - Left click: focus a pane; select a command row. Clicking never starts/stops it.
 - Mouse wheel: navigate the hovered list or scroll Logs/Details/Help; log scrolling
   pauses following (`G` resumes).
-- `/`: enter a literal, case-sensitive search of **all retained output for the
-  selected run**, not just the loaded tail. Enter searches; `n` / `N` jump to
-  next / previous matches. Esc clears/cancels; `G` exits search and follows.
-  In the search prompt, Esc / Ctrl-C cancels and lifecycle/quit letters are text.
+- **In the focused Logs pane only**, `/` enters a literal, case-sensitive search
+  of **all retained output for the selected run**, not just the loaded tail.
+  Enter searches; `n` / `N` jump to next / previous matches. Esc clears/cancels;
+  `G` exits search and follows. Other panes do not handle log-search keys.
+  The prompt stays inside Logs; Esc / Ctrl-C cancels and lifecycle/quit letters
+  are text. Leaving Logs cancels in-flight search requests.
 - `?`: contextual help; `q` / `Ctrl-C`: quit the dashboard, **not commands**.
 
 Commands retain their configured order. Active removed/moved aliases remain
@@ -81,9 +84,11 @@ failures/warnings, and cyan for naturally exited services. Text labels and the
 Logs start at `logs.tail`, continue by run-scoped cursors, and keep collecting
 while normally paused. Paging/search jumps enter a bounded historical window;
 `G` reloads the live tail. Supervisor capture never pauses. Switching alias/run
-replaces the view buffer; switching tabs cancels only local reads. UI retention is independently capped at 10,000 logical
-lines and 2 MiB of sanitized text; explicit markers identify disk gaps and UI
-eviction. Only visible rows/columns enter gocui's cell buffer. Normal validated
+replaces the view buffer; switching tabs cancels only local reads. UI retention
+is independently capped at 10,000 logical lines and 2 MiB of sanitized text;
+explicit markers identify disk gaps and UI eviction. Soft wrapping preserves
+application colors and adapts to resizing; only visible wrapped rows enter
+gocui's cell buffer, even for multi-megabyte lines. Normal validated
 ANSI colors/styles are preserved; clipboard/title/hyperlink, cursor/erase, bidi,
 and other controls are removed. Carriage returns become newlines (CRLF stays one
 newline), tabs become spaces, and invalid UTF-8 becomes replacement characters.

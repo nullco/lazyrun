@@ -29,8 +29,11 @@ Press `?` for keys, `2`/`3` to select commands, and Enter to scroll their detail
 Errors appear as nonblocking notifications; the latest full notification is also
 in Details (scroll down). `!` next to a command means a run/metadata/log error.
 
+Logs soft-wrap to the pane width, including long lines. Up/Down, `j/k`, the
+mouse wheel and PgUp/PgDn scroll visual rows, not whole application lines.
+Resizing reflows the text; application colors are retained across wraps.
 Manual log scrolling pauses follow, not collection. `G` resumes following;
-Left/Right scroll long lines horizontally. `[output truncated or dropped]` marks
+Left/Right scroll Details horizontally. `[output truncated or dropped]` marks
 missing disk bytes. The dashboard-buffer eviction banner means the independent
 10,000-line/2 MiB UI ceiling was reached; disk retention may still contain more.
 Scroll past the loaded top to page in older retained output, or press `Home` to
@@ -39,9 +42,13 @@ uses bounded windows rather than accumulating whole logs. Very long lines can
 span page fragments. A "beginning not retained" title/notification means rotation
 or loss removed the original beginning; there is nothing earlier to load.
 
-`/` opens a literal, case-sensitive search across all retained output of the
-selected latest run. Enter submits; `n`/`N` navigate highlighted matches, Esc
-clears/cancels, and `G` returns to live follow. Search ignores ANSI/control strings
+Focus the selected command's **Logs pane** first (Enter or click inside Logs).
+Only there does `/` open a literal, case-sensitive search across all retained
+output of the selected latest run. The prompt stays inside Logs. Enter submits;
+`n`/`N` navigate highlighted matches, Esc clears/cancels, and `G` returns to live
+follow. Project, Services, Tasks and Details do not handle these log-search keys.
+Leaving Logs cancels in-flight searches; completed results remain available when
+returning to the same command's Logs. Search ignores ANSI/control strings
 and UI timestamps, expands tabs, and replaces invalid UTF-8 like the dashboard.
 Queries are at most 256 UTF-8 bytes; no regex or multiline matching. The prompt
 accepts text and Backspace; Esc/Ctrl-C cancels without executing lifecycle keys.

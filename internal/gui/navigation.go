@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jesseduffield/gocui"
+	"github.com/mattn/go-runewidth"
 	"github.com/nullco/lazyrun/internal/logsearch"
 	"github.com/nullco/lazyrun/internal/model"
 )
@@ -20,6 +21,8 @@ const windowBytes = 8 * 1024
 type navigation struct {
 	history, windowBusy      bool
 	logWidth, logHeight      int
+	wrapTop                  int
+	wrapTarget               *wrapTarget
 	streamFirst, streamEnd   uint64
 	searchEditing            bool
 	searchDraft, searchQuery string
@@ -33,6 +36,11 @@ type navigation struct {
 	matchIndex               int
 	searchOffset             uint64
 }
+type wrapTarget struct {
+	anchor uint64
+	column int
+}
+
 type searchJob struct {
 	ctx          context.Context
 	generation   uint64
@@ -82,6 +90,8 @@ func (d *dashboard) resetNavigation() {
 	d.windowBusy = false
 	d.streamFirst = 0
 	d.streamEnd = 0
+	d.wrapTop = 0
+	d.wrapTarget = nil
 }
 func (d *dashboard) queueWindow(anchor uint64, before, delta int) {
 	item, ok := d.current()
@@ -89,6 +99,7 @@ func (d *dashboard) queueWindow(anchor uint64, before, delta int) {
 		return
 	}
 	d.cancelWindow()
+	d.wrapTarget = nil
 	d.history = true
 	d.follow = false
 	d.windowBusy = true
@@ -101,32 +112,42 @@ func (d *dashboard) scrollLogs(delta int) {
 	if d.windowBusy {
 		return
 	}
-	if delta < 0 && d.top+delta < 0 && len(d.buffer.lines) > 0 {
+	if delta < 0 && d.top == 0 && d.wrapTop+delta < 0 && len(d.buffer.lines) > 0 {
 		anchor := d.buffer.lines[0].cursor
 		if anchor > d.streamFirst {
 			d.queueWindow(anchor, 32*1024, delta)
 			return
 		}
 	}
-	_, height := d.logViewport()
-	if d.history && delta > 0 && d.top+delta > max(0, len(d.buffer.lines)-height) && d.cursor < d.streamEnd {
-		anchor := d.cursor
-		if len(d.buffer.lines) > 1 {
-			anchor = d.buffer.lines[max(0, len(d.buffer.lines)-height)].cursor
-		}
-		if anchor <= d.buffer.lines[0].cursor {
-			anchor = d.cursor
-		}
-		d.queueWindow(anchor, 8*1024, delta)
+	next, bottom := d.shiftLogPosition(d.logPosition(), delta), d.logBottom()
+	if d.history && delta > 0 && (afterLogPosition(next, bottom) || !afterLogPosition(bottom, d.logPosition())) && d.cursor < d.streamEnd {
+		// Seek from the page end, not the start of its last logical line:
+		// a wrapped partial line can occupy the entire page.
+		d.queueWindow(d.cursor, windowBytes/2, delta)
 		return
 	}
-	d.top = max(0, d.top+delta)
+	d.setLogPosition(next)
+}
+func (d *dashboard) scrollHorizontal(delta int) {
+	if d.owner == projectPane || d.tab != 0 {
+		d.horizontal = max(0, d.horizontal+delta)
+	}
 }
 
 // Geometry, not a retained gocui view, determines the visible page height.
 func (d *dashboard) logViewport() (int, int) { return d.logWidth, max(1, d.logHeight) }
-func (d *dashboard) goHome()                 { d.cancelSearch(); d.horizontal = 0; d.queueWindow(0, 0, 0) }
+func (d *dashboard) goHome() {
+	if !d.logPaneFocused() {
+		return
+	}
+	d.cancelSearch()
+	d.horizontal = 0
+	d.queueWindow(0, 0, 0)
+}
 func (d *dashboard) goFollow() {
+	if !d.logPaneFocused() {
+		return
+	}
 	d.clearSearch()
 	if d.history {
 		d.cancelWindow()
@@ -160,7 +181,7 @@ func (d *dashboard) consumeWindow(e event) {
 	d.loaded = true
 	d.unavailable = e.read.Unavailable
 	d.logError = singleLine(e.read.Error)
-	d.top = 0
+	d.top, d.wrapTop = 0, 0
 	for i, line := range d.buffer.lines {
 		if line.cursor <= e.anchor {
 			d.top = i
@@ -168,19 +189,72 @@ func (d *dashboard) consumeWindow(e event) {
 			break
 		}
 	}
-	d.top = max(0, d.top+e.delta)
-	if e.anchor == 0 {
-		d.top = 0
+	if d.top < len(d.buffer.lines) {
+		column := d.windowColumn(*e.read, e.anchor)
+		if target := d.wrapTarget; target != nil && target.anchor == e.anchor {
+			column = target.column
+		}
+		d.wrapTop = d.buffer.lines[d.top].wrapped(d.logWidth).rowAt(column)
+	}
+	d.wrapTarget = nil
+	d.setLogPosition(d.shiftLogPosition(d.logPosition(), e.delta))
+	if e.anchor == 0 && e.delta == 0 && d.matchIndex < 0 {
+		d.top, d.wrapTop = 0, 0
 	}
 	if e.read.First > e.anchor {
 		d.notify("Original output is no longer retained; showing earliest available output")
 	}
 }
 
-func (d *dashboard) openSearch() {
+// A window can begin in the middle of a huge logical line. Sanitize just its
+// bounded prefix to locate the requested raw anchor within the wrapped fragment.
+func (d *dashboard) windowColumn(read model.LogRead, anchor uint64) int {
+	prefix := read
+	prefix.Records, prefix.Data = nil, nil
+	prefix.Next = min(anchor, read.Next)
+	for _, record := range read.Records {
+		if record.Cursor >= anchor {
+			break
+		}
+		record.Data = record.Data[:min(uint64(len(record.Data)), anchor-record.Cursor)]
+		prefix.Records = append(prefix.Records, record)
+	}
+	if len(read.Records) == 0 && len(read.Data) > 0 {
+		first := read.Next - uint64(len(read.Data))
+		if anchor > first {
+			prefix.Data = read.Data[:min(uint64(len(read.Data)), anchor-first)]
+		}
+	}
+	var b logBuffer
+	b.reset(d.state.Project.Logs.Timestamps)
+	b.consume(prefix, 0, true)
+	column := 0
+	if len(b.lines) > 0 {
+		for _, r := range plain(b.lines[len(b.lines)-1].text) {
+			column += max(0, runewidth.RuneWidth(r))
+		}
+	}
+	return column
+}
+
+// The shared detail view is a Logs pane only when focused on a command's
+// Logs tab. Project, command lists and Details have no log-search shortcuts.
+func (d *dashboard) logPaneFocused() bool {
+	if d.focus != detailPane || d.owner == projectPane || d.tab != 0 || d.help || d.small {
+		return false
+	}
 	item, ok := d.current()
-	if !ok || item.Run.ID == "" || d.tab != 0 {
-		d.notify("Select a started command's Logs to search")
+	return ok && item.Run.ID != ""
+}
+func (d *dashboard) clearFocusedSearch() bool {
+	if !d.logPaneFocused() || d.searchQuery == "" {
+		return false
+	}
+	d.clearSearch()
+	return true
+}
+func (d *dashboard) openSearch() {
+	if !d.logPaneFocused() {
 		return
 	}
 	d.searchDraft = ""
@@ -243,7 +317,7 @@ func (e searchEditor) Edit(_ *gocui.View, key gocui.Key, ch rune, _ gocui.Modifi
 }
 
 func (d *dashboard) requestSearch(request model.LogSearchRequest) {
-	if d.searchQuery == "" || d.logRun == "" {
+	if !d.logPaneFocused() || d.searchQuery == "" || d.logRun == "" {
 		return
 	}
 	d.cancelSearch()
@@ -274,6 +348,9 @@ func (d *dashboard) pollSearch() {
 	}
 }
 func (d *dashboard) consumeSearch(e event) {
+	if !d.logPaneFocused() {
+		return
+	}
 	if e.err != nil {
 		d.searchBusy = false
 		d.notify("Search: " + e.err.Error())
@@ -320,20 +397,22 @@ func (d *dashboard) jumpMatch() {
 	}
 	m := d.matches[d.matchIndex]
 	anchor := m.LineStart
-	d.horizontal = 0
+	column := int(m.Column)
+	if d.state.Project.Logs.Timestamps {
+		column += 25
+	}
 	if m.Cursor-anchor >= windowBytes/2 || m.Column == 0 && anchor == 0 && m.Cursor > 0 {
 		anchor = m.Cursor // a huge line is shown as a bounded fragment at the match
-	} else {
-		column := m.Column
+		column = 0
 		if d.state.Project.Logs.Timestamps {
-			column += 25
+			column = 25
 		}
-		d.horizontal = int(max(0, int64(column)-int64(d.logWidth/2)))
 	}
 	d.queueWindow(anchor, 0, 0)
+	d.wrapTarget = &wrapTarget{anchor: anchor, column: column}
 }
 func (d *dashboard) nextMatch(delta int) {
-	if d.searchQuery == "" || d.searchBusy || d.windowBusy || d.matchIndex < 0 {
+	if !d.logPaneFocused() || d.searchQuery == "" || d.searchBusy || d.windowBusy || d.matchIndex < 0 {
 		return
 	}
 	next := d.matchIndex + delta
@@ -374,10 +453,14 @@ func (d *dashboard) searchStatus() string {
 // Search overlays fixed styles without sacrificing the application colors that
 // are restored at the end of each match. Only already-sanitized text enters it.
 func highlightSearch(line logLine, query string) logLine {
+	return highlightSearchContext(line, query, "", "")
+}
+func highlightSearchContext(line logLine, query, before, after string) logLine {
 	if query == "" {
 		return line
 	}
-	text := plain(line.text)
+	visible := plain(line.text)
+	text := before + visible + after
 	type span struct{ start, end int }
 	var spans []span
 	for start := 0; start < len(text); {
@@ -386,7 +469,10 @@ func highlightSearch(line logLine, query string) logLine {
 			break
 		}
 		i += start
-		spans = append(spans, span{i, i + len(query)})
+		left, right := max(0, i-len(before)), min(len(visible), i+len(query)-len(before))
+		if left < right {
+			spans = append(spans, span{left, right})
+		}
 		start = i + len(query)
 	}
 	if len(spans) == 0 {

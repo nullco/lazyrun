@@ -6,11 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/nullco/lazyrun/internal/model"
 	"github.com/nullco/lazyrun/internal/testutil"
 	"github.com/nullco/lazyrun/internal/transport"
+	"golang.org/x/sys/unix"
 )
 
 func navigationProject(t *testing.T) (*integration, model.Run) {
@@ -97,6 +99,47 @@ func TestLogNavigationWindowAndSearchThroughIPC(t *testing.T) {
 	}
 }
 
+func TestDashboardWrapsLongLinesScrollsAndReflowsAfterResize(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	text := "WRAP-BEGIN " + strings.Repeat("x", 800) + " WRAP-MIDDLE " + strings.Repeat("y", 800) + " WRAP-END\n"
+	command := "printf '%s' '" + text + "'"
+	f := newIntegration(t, fmt.Sprintf("version: 1\nlogs: {timestamps: false}\ntasks:\n  wrapped:\n    command: %q\n", command))
+	run, err := f.connection.Client.Start(context.Background(), "wrapped", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.remember(run)
+	run = f.finished("wrapped", run)
+	cmd, master := terminalClient(t, f.root)
+	out := watchTerminal(t, master)
+	eventuallyIntegration(t, func() bool { return out.contains("Tasks") })
+	keys(t, master, "3\r")
+	// The suffix is far outside the first pane-width of this single line.
+	// No horizontal scrolling or search is needed to see it in follow mode.
+	eventuallyIntegration(t, func() bool { return out.contains("WRAP-END") })
+	out.clear()
+	keys(t, master, "\x1b[H")
+	eventuallyIntegration(t, func() bool { return out.contains("WRAP-BEGIN") })
+	out.clear()
+	keys(t, master, "\x1b[6~")
+	eventuallyIntegration(t, func() bool { return out.contains("WRAP-END") })
+	out.clear()
+	keys(t, master, "G")
+	eventuallyIntegration(t, func() bool { return out.contains("following") })
+	out.clear()
+	if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 18, Col: 70}); err != nil {
+		t.Fatal(err)
+	}
+	eventuallyIntegration(t, func() bool { return out.contains("WRAP-END") })
+	keys(t, master, "q")
+	if err := waitClient(t, cmd); err != nil {
+		t.Fatal(err)
+	}
+	if findRun(f.state(), "wrapped").ID != run.ID || f.logs("wrapped", run) != text {
+		t.Fatal("wrapping changed the run or its stored output")
+	}
+}
+
 func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	f, run := navigationProject(t)
@@ -114,7 +157,7 @@ func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	keys(t, master, "3\r")
 	eventuallyIntegration(t, func() bool { return out.contains("LATE needle") })
 	out.clear()
-	keys(t, master, "\x1b[5~") // PgUp beyond the configured 20-line tail
+	keys(t, master, "\x1b[5~\x1b[5~\x1b[5~") // PgUp beyond the now-wrapped 20-line tail
 	eventuallyIntegration(t, func() bool { return out.contains("history") })
 	out.clear()
 	keys(t, master, "\x1b[H") // Home: first retained byte, not just buffer top
@@ -124,6 +167,15 @@ func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	eventuallyIntegration(t, func() bool { return out.contains("long-match-suffix") })
 	out.clear()
 	keys(t, master, "/needle\r")
+	eventuallyIntegration(t, func() bool { return out.contains("search \"needle\"") && out.contains("EARLY") })
+	out.clear()
+	// Log search/navigation must not capture list-pane keys. If / opened a
+	// global prompt, ? would become search text instead of opening Help; if G
+	// cleared the log search here, returning to Logs would lose this match.
+	keys(t, master, "3/nNG?")
+	eventuallyIntegration(t, func() bool { return out.contains("Navigation") })
+	out.clear()
+	keys(t, master, "?\r")
 	eventuallyIntegration(t, func() bool { return out.contains("search \"needle\"") && out.contains("EARLY") })
 	out.clear()
 	keys(t, master, "n")
@@ -138,7 +190,7 @@ func TestDashboardPagesToBeginningAndSearchesAllRetainedLogs(t *testing.T) {
 	keys(t, master, "G") // G clears search and returns to a fresh live tail
 	eventuallyIntegration(t, func() bool { return out.contains("LATE needle") })
 	keys(t, master, "/qSsrneedle") // editing must not quit or execute lifecycle hotkeys
-	eventuallyIntegration(t, func() bool { return out.contains("Search all retained") })
+	eventuallyIntegration(t, func() bool { return out.contains("Search logs") })
 	if findRun(f.state(), "archive").ID != run.ID {
 		t.Fatal("search editing reran the command")
 	}

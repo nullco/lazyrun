@@ -214,8 +214,8 @@ Streaming KMP is linear, carries UTF-8/escape-parser state and raw positions
 across capture records/requests, and resets at explicit gaps. It excludes
 ANSI/control strings and display timestamps, with the same CR/tab/UTF-8/control
 semantics as the GUI. A sanitizer-equivalence fuzz test guards this boundary.
-Match positions include raw line starts and display columns, so horizontal
-scrolling reveals matches in long lines; very large lines seek a match fragment.
+Match positions include raw line starts and display columns, so jumps reveal
+the matching wrapped row in long lines; very large lines seek a match fragment.
 
 Each request scans at most 256 KiB (disk lock only per 64 KiB read), returns at
 most 64 matches, and carries a validated bounded continuation with the client.
@@ -231,9 +231,14 @@ bounded disk read may finish. Filesystem stalls retain the existing IO caveat.
 One coalesced search worker and one coalesced log/window worker use request
 contexts, generations, run IDs and the bounded UI mailbox. Alias/run changes,
 Details/minimum-size modes and quit cancel local requests; never capture or
-supervision. An editable, byte-bounded prompt consumes lifecycle/quit letters as
-text. Highlighting runs only on cropped viewport text, restores application
-styles afterwards, and never expands an entire long line into styled cells.
+supervision. Log-search shortcuts are view-bound and require the focused command Logs tab,
+not merely a selected command: Project, Services, Tasks and Details cannot open,
+navigate or clear log search. Leaving Logs cancels in-flight search and pending
+match-window requests, while completed results remain local to the same run.
+An editable, byte-bounded prompt inside Logs consumes lifecycle/quit letters as
+text. Highlighting runs only on viewport text with bounded adjacent context
+(for matches spanning soft wraps), restores application styles afterwards, and
+never expands an entire long line into styled cells.
 
 ## M5 dashboard and terminal boundary
 
@@ -288,10 +293,14 @@ The selected view retains at most 10,000 logical lines AND 2 MiB of sanitized
 text, including timestamp/style prefixes. A huge partial line is byte-bounded
 independently of newline count. Eviction drops old strings/references and adjusts
 paused line anchoring; a persistent UI-eviction banner distinguishes it from disk
-loss. Long lines are horizontally scrollable rather than expanded into unbounded
-wrapped rows. Only visible rows/columns are sent to gocui, not the entire retained
+loss. Logs soft-wrap to the current pane width, and scrolling/follow/search
+jumps use visual rows. A sparse byte/style checkpoint every 64 wrapped rows
+avoids allocating a string or cell array per row; only visible rows plus bounded
+search context are materialized. Paused anchors retain their logical line and
+wrapped column on resize/eviction. Details remain horizontally scrollable.
+Only visible rows/columns are sent to gocui, not the entire retained
 buffer; terminal cell arrays therefore remain screen-sized. Color state is
-canonicalized in bounded prefixes across line eviction/horizontal clipping.
+canonicalized in bounded prefixes across line eviction, soft wraps and clipping.
 
 Audited gocui `escape.go`/`view.go`: it interprets SGR but also line erasure and
 carriage-return overwrites; malformed escapes can become literal cells. Do not

@@ -203,7 +203,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	text := ""
 	if d.windowBusy {
 		text = "Loading retained log page…"
-	} else if d.searchQuery != "" {
+	} else if d.logPaneFocused() && d.searchQuery != "" {
 		text = d.searchStatus()
 	}
 	if !d.connected {
@@ -258,7 +258,8 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	}
 	_ = g.DeleteView("help")
 	if d.searchEditing {
-		v, err := view(g, "search", "Search all retained logs — Enter searches, Esc cancels", rectangle{2, height - 5, width - 3, height - 2}, true)
+		r := areas["detail"]
+		v, err := view(g, "search", "Search logs — Enter / Esc", rectangle{r.x0 + 1, r.y1 - 3, r.x1 - 1, r.y1 - 1}, true)
 		if err != nil {
 			return err
 		}
@@ -288,7 +289,9 @@ func (d *dashboard) showDetails(v *gocui.View, text string) {
 	putLines(v, lines, d.detailTop, d.horizontal)
 }
 func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
-	d.logWidth, d.logHeight = v.Size()
+	width, height := v.Size()
+	d.resizeLogs(width)
+	d.logHeight = height
 	if item.Run.ID == "" {
 		v.FgColor = gocui.ColorWhite | gocui.AttrDim
 		putLines(v, textLines("Not started. Press S to start/run this command."), 0, 0)
@@ -309,27 +312,15 @@ func (d *dashboard) showLogs(v *gocui.View, item model.CommandState) {
 		putLines(v, textLines("(no displayable output)"), 0, 0)
 		return
 	}
-	_, height := v.Size()
 	if d.buffer.evicted {
 		fmt.Fprint(v, crop(coloredLabel("[older output discarded from dashboard buffer]", styleYellow), "", 0, v.InnerWidth()), "\n")
 		height--
 	}
-	d.logHeight = height
-	bottom := max(0, len(lines)-height)
-	if d.follow {
-		d.top = bottom
-	} else {
-		d.top = min(d.top, bottom)
-	}
-	// putLines uses view height; slice also accounts for the eviction banner.
-	end := min(len(lines), d.top+height)
-	width, _ := v.Size()
-	for i := d.top; i < end; i++ {
-		if i > d.top {
+	d.logHeight = max(1, height)
+	for i, line := range d.visibleLogs() {
+		if i > 0 {
 			fmt.Fprint(v, "\n")
 		}
-		line := logLine{text: crop(lines[i].text, lines[i].prefix, d.horizontal, width)}
-		line = highlightSearch(line, d.searchQuery)
 		fmt.Fprint(v, line.text)
 	}
 }
@@ -340,12 +331,13 @@ Tab / Shift-Tab   Next / previous pane
 j / k, Up / Down  Select command; scroll focused detail pane
 Enter / Esc       Focus details / return to owning pane
 [ / ]             Switch Logs / Details
-PgUp / PgDn       Scroll by ten lines; Left / Right scroll sideways
+PgUp / PgDn       Scroll by ten rows; Logs wrap to pane width
+Left / Right      Scroll Details sideways
 Left click        Focus pane; select a clicked command (no lifecycle action)
 Mouse wheel       Navigate hovered list; scroll Logs / Details / Help
 Home / G          Earliest retained output / return to live follow
-/                 Literal, case-sensitive search of all retained run output
-n / N             Next / previous match; Esc clears/cancels search
+/ (focused Logs)  Literal, case-sensitive search of all retained run output
+n / N (Logs only) Next / previous match; Esc clears/cancels log search
 
 Selected command only (never project-wide)
 S                 Start service / run task

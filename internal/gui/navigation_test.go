@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,115 @@ func navigationDashboard(t *testing.T) *dashboard {
 	d.logWidth, d.logHeight = 60, 8
 	return d
 }
+func TestLogSearchShortcutsOnlyAffectFocusedLogs(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		focus, owner      pane
+		tab               int
+		help, small, idle bool
+	}{
+		{"project", projectPane, projectPane, 0, false, false, false},
+		{"services", servicesPane, servicesPane, 0, false, false, false},
+		{"tasks", tasksPane, tasksPane, 0, false, false, false},
+		{"project details", detailPane, projectPane, 0, false, false, false},
+		{"command details", detailPane, servicesPane, 1, false, false, false},
+		{"help", detailPane, servicesPane, 0, true, false, false},
+		{"minimum size", detailPane, servicesPane, 0, false, true, false},
+		{"not started", detailPane, servicesPane, 0, false, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			d := navigationDashboard(t)
+			d.cancelWindow()
+			d.focus, d.owner, d.tab, d.help, d.small = test.focus, test.owner, test.tab, test.help, test.small
+			if test.idle {
+				d.state.Commands[0].Run.ID = ""
+			}
+			d.searchQuery, d.searchDraft = "saved", "draft"
+			d.matches = []model.LogMatch{{Cursor: 10, End: 15}, {Cursor: 30, End: 35}}
+			d.matchIndex, d.follow, d.history = 0, false, true
+			d.openSearch()
+			d.nextMatch(1)
+			d.nextMatch(-1)
+			d.goHome()
+			d.goFollow()
+			d.requestSearch(model.LogSearchRequest{Query: "saved"})
+			if d.clearFocusedSearch() || d.searchEditing || d.searchBusy || d.windowBusy || d.matchIndex != 0 || d.searchQuery != "saved" || d.searchDraft != "draft" || d.follow || !d.history || len(d.jobs) != 0 || len(d.searchJobs) != 0 || d.notice != "" {
+				t.Fatal("a non-Logs pane handled a log-search shortcut")
+			}
+		})
+	}
+	d := navigationDashboard(t)
+	d.openSearch()
+	if !d.searchEditing {
+		t.Fatal("focused Logs did not open its own search")
+	}
+	d.searchEditing = false
+	d.searchQuery = "saved"
+	if !d.clearFocusedSearch() || d.searchQuery != "" {
+		t.Fatal("focused Logs did not clear its own search")
+	}
+}
+
+func TestLogSearchPromptStaysInsideLogPaneAndStatusIsLocal(t *testing.T) {
+	for _, size := range [][2]int{{MinWidth, MinHeight}, {100, 30}} {
+		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+			g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: size[0], Height: size[1], OutputMode: gocui.OutputTrue, SupportOverlaps: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(g.Close)
+			d := navigationDashboard(t)
+			d.openSearch()
+			if err := d.layout(g); err != nil {
+				t.Fatal(err)
+			}
+			x0, y0, x1, y1, err := g.ViewPosition("search")
+			if err != nil {
+				t.Fatal(err)
+			}
+			log := geometry(size[0], size[1])["detail"]
+			if x0 <= log.x0 || x1 >= log.x1 || y0 <= log.y0 || y1 >= log.y1 {
+				t.Fatal("log search prompt covered another pane", x0, y0, x1, y1, log)
+			}
+			d.searchKey(gocui.KeyEsc)
+			d.searchQuery = "saved"
+			d.matchIndex = 0
+			d.setFocus(servicesPane)
+			if err := d.layout(g); err != nil {
+				t.Fatal(err)
+			}
+			v, _ := g.View("notification")
+			if strings.Contains(v.Buffer(), "search") || strings.Contains(v.Buffer(), "n/N") {
+				t.Fatal("another pane advertised global log-search shortcuts", v.Buffer())
+			}
+		})
+	}
+}
+
+func TestLeavingLogsRejectsPendingSearchMatchWindow(t *testing.T) {
+	d := navigationDashboard(t)
+	d.searchQuery = "needle"
+	d.matches = []model.LogMatch{{Cursor: 10, End: 16}, {Cursor: 30, End: 36}}
+	d.matchIndex = 0
+	d.jumpMatch()
+	job := <-d.jobs
+	d.setFocus(servicesPane)
+	if d.windowBusy || d.wrapTarget != nil || d.searchQuery != "needle" {
+		t.Fatal("search match page remained active outside Logs")
+	}
+	d.events <- event{generation: job.generation, window: true, read: &model.LogRead{RunID: "run", Data: []byte("OLD"), Next: 3}}
+	d.events <- event{searchGeneration: d.searchGeneration, search: &model.LogSearchResult{RunID: "run", Matches: []model.LogMatch{{Cursor: 100, End: 106}}}}
+	d.drain()
+	if len(d.buffer.lines) != 0 || d.matches[0].Cursor != 10 || d.windowBusy {
+		t.Fatal("background search result affected another pane")
+	}
+	d.setFocus(detailPane)
+	d.nextMatch(1)
+	if d.matchIndex != 1 || !d.windowBusy {
+		t.Fatal("returning to Logs lost its saved search")
+	}
+}
+
 func TestLineAnchorsTrackRawNewlinesNotHiddenControlPayloads(t *testing.T) {
 	data := []byte("A\x1b]0;hidden\nlines\aB\nC\r\nD café\n")
 	for size := 1; size <= len(data); size++ {
@@ -156,8 +266,8 @@ func TestSearchJumpShowsLongLineMatchesAndPreviousBoundaryKeepsForwardCursor(t *
 	d.matchIndex = 0
 	d.jumpMatch()
 	job := <-d.jobs
-	if job.after != 8900 || d.horizontal != 70 {
-		t.Fatal("match was left offscreen", job, d.horizontal)
+	if job.after != 8900 || d.wrapTarget == nil || d.wrapTarget.column != 100 || d.horizontal != 0 {
+		t.Fatal("match did not target its wrapped row", job, d.wrapTarget)
 	}
 	d.matches[0] = model.LogMatch{Cursor: 40000, End: 40006, LineStart: 0, Column: 40000}
 	d.jumpMatch()
@@ -173,12 +283,13 @@ func TestSearchJumpShowsLongLineMatchesAndPreviousBoundaryKeepsForwardCursor(t *
 		t.Fatal("previous boundary destroyed forward continuation")
 	}
 }
-func TestSearchWorkerCancellationOnSelectionAndDetails(t *testing.T) {
+func TestSearchWorkerCancellationOnFocusSelectionAndDetails(t *testing.T) {
 	c := &fakeClient{reads: make(chan string, 4)}
 	d := testDashboard(t, c)
 	d.state.Commands[0].Run.ID = "one"
 	d.state.Commands[1].Run.ID = "two"
 	d.setFocus(servicesPane)
+	d.setFocus(detailPane)
 	d.spawn(d.pollSearch)
 	d.searchQuery = "needle"
 	d.requestSearch(model.LogSearchRequest{Query: "needle"})
@@ -191,10 +302,15 @@ func TestSearchWorkerCancellationOnSelectionAndDetails(t *testing.T) {
 		t.Fatal("search worker did not request")
 	}
 	generation := d.searchGeneration
+	d.setFocus(servicesPane)
+	if d.searchBusy || d.searchGeneration == generation || d.searchQuery != "needle" {
+		t.Fatal("leaving Logs failed to cancel local search or cleared its saved query")
+	}
 	d.move(1)
 	if d.searchBusy || d.searchQuery != "" || d.searchGeneration == generation {
 		t.Fatal("selection failed to cancel search")
 	}
+	d.setFocus(detailPane)
 	d.searchQuery = "needle"
 	d.requestSearch(model.LogSearchRequest{Query: "needle"})
 	select {

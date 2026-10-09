@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jesseduffield/gocui"
 	"github.com/nullco/lazyrun/internal/model"
@@ -122,6 +123,7 @@ func TestMouseWheelNavigatesHoveredPaneAndPausesLogs(t *testing.T) {
 	if d.selected[servicesPane] != "api" {
 		t.Fatal("wheel did not clamp at first row")
 	}
+	d.buffer.append([]byte("a\nb\nc\nd\ne\nf\n"), time.Time{})
 	d.follow = true
 	d.mouseWheel(detailPane, 3)
 	if d.focus != detailPane || d.owner != servicesPane || d.follow || d.top != 3 {
