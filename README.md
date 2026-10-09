@@ -43,9 +43,7 @@ cd /path/to/project
 in configuration order. It executes nothing and does not launch a supervisor.
 Run `lazyrun` without action flags to open the dashboard. The client connects or
 auto-launches a supervisor and synchronizes configuration, but starts no commands.
-A terminal is required; scripts/pipes should use `--state` for JSON. See
-[release/install instructions](docs/release.md) for the public module path and
-verified Linux archive workflow.
+A terminal is required; scripts/pipes should use `--state` for JSON.
 
 ### Dashboard workflow
 
@@ -111,7 +109,7 @@ not archived.
 Paging/search require protocol **3**. Existing protocol-2 supervisors are not
 replaced automatically: use the older binary to stop their commands, verify they
 have finished, then identify and deliberately stop the idle supervisor before
-reopening with the new binary. See [compatibility](docs/troubleshooting.md#private-paths-and-compatibility).
+reopening with the new binary.
 
 ### Headless workflow
 
@@ -148,7 +146,7 @@ launching later unexpectedly.
 The module is `github.com/nullco/lazyrun`. After publishing a reviewed commit/tag,
 install with `go install github.com/nullco/lazyrun/cmd/lazyrun@latest` (prefer a
 published tag for repeatable installs). No tag/public release is implied by this
-working tree. See [the release checklist](docs/release.md).
+working tree.
 
 ## Configuration
 
@@ -216,7 +214,7 @@ leader's identity by delaying its reap, tracks ordinary descendants through
 inside the dedicated supervisor, not an arbitrary embedding application. That
 process must not independently reap its children or change subreaper behavior.
 Restricted/unreadable `/proc` causes conservative `unknown` state rather than
-unsafe signaling or overlap. See [implementation decisions](docs/decisions.md).
+unsafe signaling or overlap.
 
 Runtime socket/locks are in `$XDG_RUNTIME_DIR/lazyrun/<project-id>/`; when unset,
 the fallback is an owner-validated private `/tmp/lazyrun-<uid>/` directory.
@@ -256,8 +254,7 @@ Commands that deliberately daemonize or escape their group are outside v1's
 lifecycle guarantees. There are no supervisor-crash, logout, or reboot recovery
 promises. After supervisor loss, potentially surviving runs become `unknown` and
 block start/stop/restart; recorded PIDs never grant signaling ownership. Available
-metadata is retained without fabricated exit codes. See
-[troubleshooting](docs/troubleshooting.md) before attempting manual cleanup.
+metadata is retained without fabricated exit codes.
 Real Flask reloader/Celery shutdown tests are opt-in release gates. **Default
 Celery prefork tasks can be interrupted by process-group SIGTERM**, even when the
 parent reports warm shutdown; test your exact pool/task configuration. See the
