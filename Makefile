@@ -1,4 +1,4 @@
-.PHONY: build test race vet fmt check smoke stress fuzz audit release release-check
+.PHONY: build test installer-test race vet fmt check smoke stress fuzz audit release release-check
 
 # Empty uses embedded module/VCS information; releases set VERSION explicitly.
 VERSION ?=
@@ -9,6 +9,11 @@ build:
 
 test:
 	go test -count=1 ./...
+
+# Offline installer tests; requires Python 3 and standard Linux packaging tools.
+installer-test:
+	sh -n scripts/install.sh
+	python3 scripts/test-install.py
 
 race:
 	go test -race -count=1 ./...
@@ -42,7 +47,7 @@ fuzz:
 audit:
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
-release-check: check smoke audit
+release-check: check installer-test smoke audit
 
 release:
 	VERSION="$(VERSION)" bash scripts/release.sh

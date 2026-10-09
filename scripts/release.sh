@@ -14,10 +14,10 @@ trap 'rm -rf -- "$stage"' EXIT
 mkdir -p dist
 # Explicit allowlist: do not copy local venvs, brokers, bytecode or secrets.
 mkdir -p "$stage/examples/flask" "$stage/examples/smoke"
-cp README.md LICENSE "$stage/"
+cp README.md RELEASE.md LICENSE "$stage/"
 cp examples/flask/lazyrun.yml "$stage/examples/flask/"
 cp examples/smoke/{README.md,lazyrun.yml,smoke_app.py,requirements.txt} "$stage/examples/smoke/"
-chmod 0644 "$stage/README.md" "$stage/LICENSE" "$stage/examples/"*/*
+chmod 0644 "$stage/README.md" "$stage/RELEASE.md" "$stage/LICENSE" "$stage/examples/"*/*
 chmod 0755 "$stage/examples" "$stage/examples/"*
 
 # Dependencies retain their own license/NOTICE texts alongside lazyrun's MIT license.
@@ -53,7 +53,7 @@ for arch in amd64 arm64; do
     -ldflags "-s -w -X main.version=$version" -o "$stage/lazyrun" ./cmd/lazyrun
   chmod 0755 "$stage/lazyrun"
   tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-    -cf - -C "$stage" lazyrun README.md LICENSE examples third-party \
+    -cf - -C "$stage" lazyrun README.md RELEASE.md LICENSE examples third-party \
     | gzip -n > "dist/lazyrun_${version}_linux_${arch}.tar.gz"
 done
 (

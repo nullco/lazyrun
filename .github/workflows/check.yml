@@ -2,8 +2,15 @@ name: Linux release gates
 
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: Version embedded in the packaged binaries
+        type: string
+        default: dev
 
 permissions:
   contents: read
@@ -19,6 +26,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
+      - run: make installer-test
       - run: make check
       - run: make fuzz
       - name: Preserve failing fuzz inputs
@@ -73,9 +81,15 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - run: make release VERSION=dev
+      - name: Build and verify release packages
+        env:
+          VERSION: ${{ inputs.version || 'dev' }}
+        run: |
+          make release VERSION="$VERSION"
+          bash scripts/check-release.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lazyrun-linux
           path: dist/*
           if-no-files-found: error
+          overwrite: true

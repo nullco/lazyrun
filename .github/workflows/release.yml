@@ -1,0 +1,74 @@
+name: Draft release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# Serialize retries for a tag; never cancel an in-progress upload.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Validate release version
+        id: tag
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$ ]]; then
+            echo 'Expected vMAJOR.MINOR.PATCH, optionally followed by -alpha.N, -beta.N, or -rc.N' >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+
+  gates:
+    needs: validate
+    uses: ./.github/workflows/check.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+
+  draft:
+    needs: [validate, gates]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: lazyrun-linux
+          path: dist
+      - name: Verify checksums and create or update the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          cd dist
+          assets=("lazyrun_${VERSION}_linux_amd64.tar.gz" "lazyrun_${VERSION}_linux_arm64.tar.gz" "lazyrun_${VERSION}_SHA256SUMS")
+          sha256sum -c "${assets[2]}"
+
+          if draft=$(gh release view "$VERSION" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [[ "$draft" != true ]]; then
+              echo 'Refusing to modify an already published release' >&2
+              exit 1
+            fi
+          else
+            flags=()
+            if [[ "$VERSION" == *-* ]]; then
+              flags+=(--prerelease)
+            fi
+            gh release create "$VERSION" --verify-tag --draft --generate-notes \
+              --title "$VERSION" "${flags[@]}"
+          fi
+          # Retrying an upload is safe while the release remains a draft.
+          gh release upload "$VERSION" "${assets[@]}" --clobber
