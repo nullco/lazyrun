@@ -114,6 +114,8 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		if err != nil {
 			return err
 		}
+		clear(d.visibleAliases[p])
+		d.visibleAliases[p] = d.visibleAliases[p][:0]
 		items := d.items(p)
 		if len(items) == 0 {
 			v.FgColor = gocui.ColorWhite | gocui.AttrDim
@@ -136,6 +138,9 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		_, h := v.Size()
 		top := max(0, selected-h+1)
 		putLines(v, lines, top, 0)
+		for i := top; i < len(items) && i < top+h; i++ {
+			d.visibleAliases[p] = append(d.visibleAliases[p], items[i].Run.Definition.Alias)
+		}
 		if d.focus == p && !d.help {
 			v.Highlight = true
 			if err := v.SetCursor(0, selected-top); err != nil {
@@ -288,6 +293,8 @@ j / k, Up / Down  Select command; scroll focused detail pane
 Enter / Esc       Focus details / return to owning pane
 [ / ]             Switch Logs / Details
 PgUp / PgDn       Scroll by ten lines; Left / Right scroll sideways
+Left click        Focus pane; select a clicked command (no lifecycle action)
+Mouse wheel       Navigate hovered list; scroll Logs / Details / Help
 
 Selected command only (never project-wide)
 S                 Start service / run task

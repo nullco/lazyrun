@@ -70,6 +70,7 @@ type dashboard struct {
 	connectionError            string
 	focus, owner               pane
 	selected                   [4]string
+	visibleAliases             [4][]string // last rendered command rows, not current state order
 	tab                        int
 	help                       bool
 	small                      bool
@@ -473,12 +474,15 @@ func (d *dashboard) bindings(g *gocui.Gui) error {
 			return err
 		}
 	}
-	return g.SetKeybinding("", '?', gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
+	if err := g.SetKeybinding("", '?', gocui.ModNone, func(*gocui.Gui, *gocui.View) error {
 		if !d.small {
 			d.help = !d.help
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return d.mouseBindings(g)
 }
 
 func outcome(r model.Run) string {

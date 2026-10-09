@@ -212,6 +212,15 @@ sanitized before adding fixed SGR styles; application log colors stay independen
 Rendered tcell simulation tests cover focus transfer, selection, help, and log
 color preservation, in addition to geometry/scrolling and real-terminal tests.
 
+Mouse reporting is enabled through the same gocui/tcell backend. Left click only
+focuses a pane/selects a displayed command; lifecycle operations stay on explicit
+keyboard actions. A bounded last-rendered alias map resolves scrolled row hits
+without using a potentially reordered state snapshot. Borders/blank rows focus
+without selecting, and gaps/footer do nothing. Help/minimum-size guards block
+underlying navigation. The wheel targets the hovered pane and shares keyboard
+scroll/follow behavior. Unit tests and actual SGR reports through a real PTY
+verify selection, focus, wheel, modal blocking and keyboard action targeting.
+
 The GUI depends on a narrow client interface, never runtime/exec/signal APIs.
 The default CLI requires terminal stdin/stdout before connecting; explicit flags
 remain headless. Poll state every 400 ms and selected logs every 200 ms, with
