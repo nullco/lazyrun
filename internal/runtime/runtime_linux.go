@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"sort"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ var (
 const MaxMemoryOutput = 2 * 1024 * 1024
 
 type Options struct {
-	PollInterval   time.Duration
+	PollInterval   time.Duration // Fallback reconciliation interval; SIGCHLD drives ordinary checks.
 	RestartTimeout time.Duration
 	DrainTimeout   time.Duration
 	Persist        func(model.Run) error // Called before launch intent and on state transitions.
@@ -82,7 +83,7 @@ func New(project model.Project, opts Options) (*Manager, error) {
 		return nil, errors.New("runtime timeouts must not be negative")
 	}
 	if opts.PollInterval == 0 {
-		opts.PollInterval = 20 * time.Millisecond
+		opts.PollInterval = 5 * time.Second
 	}
 	if opts.RestartTimeout == 0 {
 		opts.RestartTimeout = 3 * time.Second
@@ -208,7 +209,13 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 	// A nil stdin is /dev/null. Use explicit files rather than exec's copying
 	// goroutines so Wait cannot hang on pipe FDs held by surviving descendants.
 	cmd.Stdout, cmd.Stderr = writer, writer
+	// Subscribe before exec so even instant exits produce a wakeup. Go's signal
+	// dispatcher broadcasts to every active run; none can steal another's event.
+	// Signals are hints only: the monitor verifies the whole group before reaping.
+	exits := make(chan os.Signal, 1)
+	signal.Notify(exits, syscall.SIGCHLD)
 	if err := cmd.Start(); err != nil {
+		signal.Stop(exits)
 		reader.Close()
 		writer.Close()
 		return launchFailure(fmt.Errorf("launch %s: %w", s.definition.Alias, err))
@@ -237,7 +244,7 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 		reader.Close()
 		captureDone <- err
 	}()
-	go m.monitor(s, reader, captureDone)
+	go m.monitor(s, reader, captureDone, exits)
 	persistErr := m.persistLocked(s)
 	if err == nil {
 		err = persistErr
@@ -395,12 +402,20 @@ func (m *Manager) Output(alias, runID string) ([]byte, bool, error) {
 	return data, truncated, nil
 }
 
-func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error) {
-	ticker := time.NewTicker(m.opts.PollInterval)
-	defer ticker.Stop()
-	for range ticker.C {
+func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error, exits chan os.Signal) {
+	defer signal.Stop(exits)
+	// Check immediately after launch, then sleep until SIGCHLD or reconciliation.
+	// A buffered signal can cover many exits; each wakeup inspects current state.
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-exits:
+		case <-timer.C:
+		}
+		timer.Reset(m.opts.PollInterval)
 		s.mu.Lock()
-		alive, err := groupAlive(s.run.Identity)
+		alive, recheck, err := groupAlive(s.run.Identity)
 		if err != nil {
 			if s.run.Lifecycle != model.Unknown || s.run.Error != err.Error() {
 				s.run.Lifecycle, s.run.Error = model.Unknown, err.Error()
@@ -410,6 +425,10 @@ func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error) {
 			continue // Fail closed: no reaping/replacement/signaling unverified PIDs.
 		}
 		if alive {
+			if recheck {
+				// Don't wait for a new signal after an unstable zombie-only scan.
+				timer.Reset(min(m.opts.PollInterval, 20*time.Millisecond))
+			}
 			if s.run.Lifecycle == model.Unknown {
 				s.run.Lifecycle, s.run.Error = model.Running, ""
 				if s.run.StopRequested {

@@ -267,7 +267,7 @@ func TestRequestEnvironmentAndOverrides(t *testing.T) {
 }
 
 func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
-	m := manager(t, map[string]string{"x": fixture(t, "ignore")}, Options{RestartTimeout: 300 * time.Millisecond})
+	m := manager(t, map[string]string{"x": fixture(t, "ignore")}, Options{PollInterval: 100 * time.Millisecond, RestartTimeout: 300 * time.Millisecond})
 	r := start(t, m, "x")
 	ready(t, m, "x", r)
 	result := make(chan error, 1)

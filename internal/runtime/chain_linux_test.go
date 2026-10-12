@@ -11,7 +11,7 @@ import (
 )
 
 func TestRapidOrphanChainCannotDisappearBetweenScans(t *testing.T) {
-	m := manager(t, map[string]string{"x": fixture(t, "chain")}, Options{PollInterval: time.Millisecond})
+	m := manager(t, map[string]string{"x": fixture(t, "chain")}, Options{PollInterval: time.Hour})
 	r, err := m.Start("x", []string{"CHAIN_DEPTH=0"})
 	if err != nil {
 		t.Fatal(err)

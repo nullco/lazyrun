@@ -101,29 +101,35 @@ func verifyLeader(id model.ProcessIdentity) error {
 // New enables child-subreaping, so orphaned descendants' zombies also remain
 // owned and unreaped. Two equal zombie-only scans are required: a single /proc
 // directory snapshot can miss a child born just before its parent exits.
-func groupAlive(id model.ProcessIdentity) (bool, error) {
+// The recheck result requests a short retry when zombie membership is still
+// settling. Those processes may already have sent their final SIGCHLD.
+func groupAlive(id model.ProcessIdentity) (alive, recheck bool, err error) {
 	first, alive, err := scanGroup(id)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if alive {
 		// Avoid accumulating orphan zombies during long-running services.
 		// No reaping happens during the zombie-only completion scans below.
-		return true, reapZombies(id, first)
+		return true, false, reapZombies(id, first)
 	}
 	second, alive, err := scanGroup(id)
 	if err != nil || alive {
-		return alive, err
+		return alive, false, err
 	}
 	if len(first) != len(second) {
-		return true, nil // Membership is still settling; leave the identity pinned.
+		return true, true, nil // Membership is still settling; leave the identity pinned.
 	}
 	for pid, p := range first {
 		if next, ok := second[pid]; !ok || next != p {
-			return true, nil
+			return true, true, nil
 		}
 	}
-	return false, nil
+	return false, false, nil
+}
+
+func executing(p procStat) bool {
+	return p.state != 'Z' && p.state != 'X' && p.state != 'x'
 }
 
 func scanGroup(id model.ProcessIdentity) (map[int]procStat, bool, error) {
@@ -153,7 +159,7 @@ func scanGroup(id model.ProcessIdentity) (map[int]procStat, bool, error) {
 				return nil, false, errors.New("group contains a process older than its owned leader")
 			}
 			members[pid] = p
-			if p.state != 'Z' && p.state != 'X' && p.state != 'x' {
+			if executing(p) {
 				alive = true
 			}
 		}
