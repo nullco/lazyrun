@@ -497,8 +497,14 @@ func (d *dashboard) action(action string) {
 	d.notify(label + " pending for " + alias)
 	client := d.client
 	d.spawn(func() {
-		ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
-		defer cancel()
+		ctx := d.ctx
+		if action != "restart" {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+		}
+		// Restart's transport deadline follows the current service timeout;
+		// closing the dashboard still cancels the client's wait.
 		var err error
 		switch action {
 		case "start":
@@ -669,6 +675,9 @@ func commandDetails(item model.CommandState) string {
 	r := item.Run
 	var out strings.Builder
 	fmt.Fprintf(&out, "Alias: %s\nKind: %s\nStatus: %s\nRun ID: %s\nPID: %d  PGID: %d\nStop requested: %t\n", singleLine(r.Definition.Alias), singleLine(string(r.Definition.Kind)), outcome(r), singleLine(r.ID), r.Identity.PID, r.Identity.PGID, r.StopRequested)
+	if item.Definition != nil {
+		fmt.Fprintf(&out, "Restart timeout: %s\n", item.Definition.RestartWait())
+	}
 	if !r.StartedAt.IsZero() {
 		fmt.Fprintf(&out, "Started: %s\n", r.StartedAt.Format(time.RFC3339))
 	}

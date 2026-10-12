@@ -54,6 +54,10 @@ func (c *Client) exchange(conn *net.UnixConn, op Operation, payload, out any) er
 // Every request uses a fresh, authenticated connection. There are no implicit
 // retries: a failed response may follow an accepted mutation. Query state first.
 func (c *Client) call(ctx context.Context, op Operation, payload, out any) error {
+	return c.callWithWait(ctx, op, payload, out, 0)
+}
+
+func (c *Client) callWithWait(ctx context.Context, op Operation, payload, out any, wait time.Duration) error {
 	dialer := net.Dialer{Timeout: IOTimeout}
 	raw, err := dialer.DialContext(ctx, "unix", c.Endpoint)
 	if err != nil {
@@ -61,11 +65,16 @@ func (c *Client) call(ctx context.Context, op Operation, payload, out any) error
 	}
 	conn := raw.(*net.UnixConn)
 	defer conn.Close()
-	deadline := time.Now().Add(IOTimeout)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
+	setDeadline := func(wait time.Duration) error {
+		deadline := time.Now().Add(IOTimeout).Add(wait)
+		if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+			deadline = d
+		}
+		return conn.SetDeadline(deadline)
 	}
-	conn.SetDeadline(deadline)
+	if err := setDeadline(0); err != nil {
+		return err
+	}
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -90,6 +99,13 @@ func (c *Client) call(ctx context.Context, op Operation, payload, out any) error
 			*(out.(*Hello)) = hello
 		}
 		return nil
+	}
+	// Only the restart operation gets the graceful-stop allowance. A stalled
+	// handshake still has the ordinary IPC deadline.
+	if wait > 0 {
+		if err := setDeadline(wait); err != nil {
+			return err
+		}
 	}
 	return c.exchange(conn, op, payload, out)
 }
@@ -139,8 +155,21 @@ func (c *Client) Stop(ctx context.Context, alias string) (model.Run, error) {
 	return run, err
 }
 func (c *Client) Restart(ctx context.Context, alias string, env []string) (model.Run, error) {
+	// A reload can change the next restart's wait without rewriting the latest
+	// run's definition. Read the current configuration before the mutation.
+	state, err := c.State(ctx)
+	if err != nil {
+		return model.Run{}, err
+	}
+	wait := model.DefaultRestartTimeout
+	for _, item := range state.Commands {
+		if item.Run.Definition.Alias == alias && item.Definition != nil {
+			wait = item.Definition.RestartWait()
+			break
+		}
+	}
 	var run model.Run
-	err := c.call(ctx, Restart, startPayload(alias, env), &run)
+	err = c.callWithWait(ctx, Restart, startPayload(alias, env), &run, wait)
 	return run, err
 }
 func (c *Client) WindowLogs(ctx context.Context, alias, runID string, anchor uint64, before, limit int) (model.LogRead, error) {

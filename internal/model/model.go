@@ -25,12 +25,22 @@ func DefaultLogSettings() LogSettings {
 	return LogSettings{Tail: 1000, MaxBytes: 10 * 1024 * 1024}
 }
 
+const DefaultRestartTimeout = 30 * time.Second
+
 type Definition struct {
-	Alias   string            `json:"alias"`
-	Kind    Kind              `json:"kind"`
-	Command string            `json:"command"`
-	Cwd     string            `json:"cwd"`
-	Env     map[string]string `json:"-"` // Never include environment values in state/metadata.
+	Alias          string            `json:"alias"`
+	Kind           Kind              `json:"kind"`
+	Command        string            `json:"command"`
+	Cwd            string            `json:"cwd"`
+	RestartTimeout time.Duration     `json:"restartTimeout"`
+	Env            map[string]string `json:"-"` // Never include environment values in state/metadata.
+}
+
+func (d Definition) RestartWait() time.Duration {
+	if d.RestartTimeout == 0 {
+		return DefaultRestartTimeout
+	}
+	return d.RestartTimeout
 }
 
 func (d Definition) Clone() Definition {

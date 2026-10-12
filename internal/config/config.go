@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"go.yaml.in/yaml/v3"
@@ -188,7 +189,7 @@ func Parse(data []byte, root string) (model.Project, error) {
 			}
 			seen[alias] = section.name
 			path := section.name + "." + alias
-			f, err := mapping(n.Content[i+1], path, "command", "cwd", "env")
+			f, err := mapping(n.Content[i+1], path, "command", "cwd", "env", "restart_timeout")
 			if err != nil {
 				return model.Project{}, err
 			}
@@ -196,10 +197,20 @@ func Parse(data []byte, root string) (model.Project, error) {
 			if !ok {
 				return model.Project{}, at(n.Content[i+1], "%s.command is required", path)
 			}
-			d := model.Definition{Alias: alias, Kind: section.kind, Cwd: root}
+			d := model.Definition{Alias: alias, Kind: section.kind, Cwd: root, RestartTimeout: model.DefaultRestartTimeout}
 			d.Command, err = text(command, path+".command", true)
 			if err != nil {
 				return model.Project{}, err
+			}
+			if timeout, ok := f["restart_timeout"]; ok {
+				value, err := text(timeout, path+".restart_timeout", true)
+				if err != nil {
+					return model.Project{}, err
+				}
+				d.RestartTimeout, err = time.ParseDuration(value)
+				if err != nil || d.RestartTimeout <= 0 {
+					return model.Project{}, at(timeout, "%s.restart_timeout must be a positive duration (for example 30s or 2m)", path)
+				}
 			}
 			if cwd, ok := f["cwd"]; ok {
 				d.Cwd, err = text(cwd, path+".cwd", true)

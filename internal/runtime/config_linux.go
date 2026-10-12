@@ -25,6 +25,9 @@ func validateProject(p model.Project) error {
 		if strings.TrimSpace(d.Alias) == "" || strings.IndexFunc(d.Alias, unicode.IsControl) >= 0 || strings.TrimSpace(d.Command) == "" || strings.ContainsRune(d.Command, 0) || !filepath.IsAbs(d.Cwd) || strings.ContainsRune(d.Cwd, 0) || (d.Kind != model.Service && d.Kind != model.Task) {
 			return fmt.Errorf("invalid definition for alias %q", d.Alias)
 		}
+		if d.RestartTimeout < 0 {
+			return fmt.Errorf("alias %s: restart timeout must be positive", d.Alias)
+		}
 		if seen[d.Alias] {
 			return fmt.Errorf("duplicate alias %q", d.Alias)
 		}

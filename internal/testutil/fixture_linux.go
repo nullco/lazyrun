@@ -44,18 +44,27 @@ func RunFixture() {
 	case "stdin":
 		b, err := io.ReadAll(os.Stdin)
 		fmt.Fprintf(os.Stdout, "stdin=%d err=%v", len(b), err)
-	case "service", "ignore":
+	case "service", "slow-service", "ignore":
 		if mode == "ignore" {
 			signal.Ignore(syscall.SIGTERM)
 		}
 		ch := make(chan os.Signal, 2)
-		if mode == "service" {
+		if mode != "ignore" {
 			signal.Notify(ch, syscall.SIGTERM, syscall.SIGUSR1)
 		} else {
 			signal.Notify(ch, syscall.SIGUSR1)
 		}
 		fmt.Fprintf(os.Stdout, "ready:%d\n", os.Getpid())
 		<-ch
+		if mode == "slow-service" {
+			delay, err := time.ParseDuration(os.Getenv("SHUTDOWN_DELAY"))
+			if err != nil || delay <= 0 {
+				fmt.Fprintln(os.Stderr, "invalid SHUTDOWN_DELAY")
+				os.Exit(95)
+			}
+			fmt.Fprint(os.Stdout, "stopping\n")
+			time.Sleep(delay)
+		}
 		fmt.Fprint(os.Stdout, "final\n")
 	case "parent", "orphan":
 		ch := make(chan os.Signal, 2)

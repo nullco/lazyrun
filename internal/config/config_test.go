@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nullco/lazyrun/internal/model"
 )
@@ -42,8 +43,37 @@ tasks:
 	if p.Services[1].Cwd != filepath.Join(root, "work") || p.Tasks[0].Cwd != root {
 		t.Fatal("cwd not rooted at project")
 	}
+	for _, d := range p.Definitions() {
+		if d.RestartTimeout != 30*time.Second {
+			t.Fatal("wrong default restart timeout", d)
+		}
+	}
 	if p.Services[0].Env["NUMBER"] != "42" {
 		t.Fatal("env lost")
+	}
+}
+
+func TestRestartTimeoutDurations(t *testing.T) {
+	root := t.TempDir()
+	for _, section := range []string{"services", "tasks"} {
+		for _, tc := range []struct {
+			value string
+			want  time.Duration
+		}{{"500ms", 500 * time.Millisecond}, {"30s", 30 * time.Second}, {"2m", 2 * time.Minute}} {
+			p, err := Parse([]byte("version: 1\n"+section+": {x: {command: echo ok, restart_timeout: "+tc.value+"}}"), root)
+			if err != nil {
+				t.Fatal(section, tc.value, err)
+			}
+			if got := p.Definitions()[0].RestartTimeout; got != tc.want {
+				t.Fatal(section, tc.value, got)
+			}
+		}
+		for _, value := range []string{"0s", "-1s", "forever", "'30'", "30", "1.5", "true", "null", "[]", "''", "9223372036854775808ns"} {
+			_, err := Parse([]byte("version: 1\n"+section+": {x: {command: echo ok, restart_timeout: "+value+"}}"), root)
+			if err == nil || !strings.Contains(err.Error(), "line 2: "+section+".x.restart_timeout") {
+				t.Fatal("invalid duration accepted or lost field location", section, value, err)
+			}
+		}
 	}
 }
 

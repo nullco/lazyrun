@@ -7,7 +7,7 @@ import (
 	"github.com/nullco/lazyrun/internal/model"
 )
 
-const ProtocolVersion = 4
+const ProtocolVersion = 5
 
 type Operation string
 

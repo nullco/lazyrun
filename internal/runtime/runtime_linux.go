@@ -38,11 +38,10 @@ var (
 )
 
 type Options struct {
-	PollInterval   time.Duration // Fallback reconciliation interval; SIGCHLD drives ordinary checks.
-	RestartTimeout time.Duration
-	DrainTimeout   time.Duration
-	Persist        func(model.Run) error // Called before launch intent and on state transitions.
-	LogStore       *logstore.Store
+	PollInterval time.Duration // Fallback reconciliation interval; SIGCHLD drives ordinary checks.
+	DrainTimeout time.Duration
+	Persist      func(model.Run) error // Called before launch intent and on state transitions.
+	LogStore     *logstore.Store
 }
 
 type Manager struct {
@@ -77,14 +76,11 @@ func New(project model.Project, opts Options) (*Manager, error) {
 	if opts.LogStore == nil {
 		return nil, errors.New("log store is required")
 	}
-	if opts.PollInterval < 0 || opts.RestartTimeout < 0 || opts.DrainTimeout < 0 {
+	if opts.PollInterval < 0 || opts.DrainTimeout < 0 {
 		return nil, errors.New("runtime timeouts must not be negative")
 	}
 	if opts.PollInterval == 0 {
 		opts.PollInterval = 5 * time.Second
-	}
-	if opts.RestartTimeout == 0 {
-		opts.RestartTimeout = 3 * time.Second
 	}
 	if opts.DrainTimeout == 0 {
 		opts.DrainTimeout = time.Second
@@ -297,8 +293,11 @@ func (m *Manager) Restart(alias string, env []string) (model.Run, error) {
 	}
 	s.pending = true
 	done := s.done
+	// Use the current configuration, captured before a concurrent reload can
+	// change the timeout of an already accepted restart.
+	timeout := s.definition.RestartWait()
 	s.mu.Unlock()
-	deadline := time.Now().Add(m.opts.RestartTimeout)
+	deadline := time.Now().Add(timeout)
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {

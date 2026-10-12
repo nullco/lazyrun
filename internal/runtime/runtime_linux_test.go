@@ -313,7 +313,12 @@ func TestRequestEnvironmentAndOverrides(t *testing.T) {
 }
 
 func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
-	m := manager(t, map[string]string{"x": fixture(t, "ignore")}, Options{PollInterval: 100 * time.Millisecond, RestartTimeout: 300 * time.Millisecond})
+	m := manager(t, map[string]string{"x": fixture(t, "ignore")}, Options{PollInterval: 100 * time.Millisecond})
+	p := m.State().Project
+	p.Tasks[0].RestartTimeout = 300 * time.Millisecond
+	if err := m.Sync(p); err != nil {
+		t.Fatal(err)
+	}
 	r := start(t, m, "x")
 	ready(t, m, "x", r)
 	result := make(chan error, 1)
@@ -325,8 +330,18 @@ func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
 	if _, err := m.Start("x", nil); !errors.Is(err, ErrRestartPending) {
 		t.Fatal(err)
 	}
-	if err := <-result; !errors.Is(err, ErrRestartBlocked) {
+	// A reload must not extend the timeout already captured by this restart.
+	p.Tasks[0].RestartTimeout = 10 * time.Second
+	if err := m.Sync(p); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrRestartBlocked) {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reload changed the pending restart timeout")
 	}
 	state, _ := snapshot(m, "x")
 	if state.ID != r.ID || state.Lifecycle != model.Stopping {
@@ -350,7 +365,12 @@ func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
 func TestShellExitDoesNotPermitOverlapWhileChildLives(t *testing.T) {
 	// The runtime's subreaper must adopt the orphan and reap it only after
 	// stable process-group completion.
-	m := manager(t, map[string]string{"x": fixture(t, "orphan")}, Options{RestartTimeout: 100 * time.Millisecond})
+	m := manager(t, map[string]string{"x": fixture(t, "orphan")}, Options{})
+	p := m.State().Project
+	p.Tasks[0].RestartTimeout = 100 * time.Millisecond
+	if err := m.Sync(p); err != nil {
+		t.Fatal(err)
+	}
 	r := start(t, m, "x")
 	ready(t, m, "x", r)
 	var childPID int

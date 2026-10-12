@@ -102,7 +102,24 @@ quit without stopping commands. On small screens, inactive panes collapse to cli
 headers; narrow screens keep Logs/Details below the list accordion
 (minimum 40 columns × 10 rows).
 
-Stop sends process-group `SIGTERM` only—never an automatic force-kill.
+Stop sends process-group `SIGTERM` only. It returns without waiting and never
+force-kills a command. Restart waits up to **30 seconds** for the old process group
+to exit before starting its replacement. Set `restart_timeout` per service or task
+to allow a longer graceful shutdown:
+
+```yaml
+services:
+  celery:
+    command: poetry run celery -A task_executor:celery worker
+    restart_timeout: 60s
+```
+
+Use a positive duration such as `30s` or `2m`. If the timeout expires, the
+replacement is canceled. The old group continues shutting down; no replacement
+starts later, and no force-kill is sent. Reloaded timeout settings apply to the
+next restart, not one already pending. Dashboard and CLI request deadlines include
+the configured wait plus time for IPC.
+
 Commands are not guaranteed to survive logout, reboot, or supervisor failure.
 
 ## Multiple projects
