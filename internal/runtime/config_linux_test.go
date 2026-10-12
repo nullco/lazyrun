@@ -91,13 +91,18 @@ func TestRestoreDoesNotOwnOrSignalRecordedProcesses(t *testing.T) {
 	r := start(t, owned, "x")
 	ready(t, owned, "x", r)
 	p := owned.State().Project
-	recovered, err := New(p, Options{LogStore: testLogStore(t)})
+	var persisted []model.Run
+	recovered, err := New(p, Options{LogStore: owned.opts.LogStore, Persist: func(r model.Run) error {
+		persisted = append(persisted, r)
+		return nil
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := recovered.Restore([]model.Run{r}); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { recovered.slots["x"].diskOutput.Release() })
 	state, _ := snapshot(recovered, "x")
 	if state.Lifecycle != model.Unknown || state.Outcome != nil {
 		t.Fatal(state)
@@ -111,10 +116,39 @@ func TestRestoreDoesNotOwnOrSignalRecordedProcesses(t *testing.T) {
 	if current.StopRequested {
 		t.Fatal("recovery signaled old run")
 	}
+	for range 3 {
+		if recovered.State().Commands[0].Run.Lifecycle != model.Unknown {
+			t.Fatal("live recorded group stopped blocking replacement")
+		}
+	}
+	if len(persisted) != 1 {
+		t.Fatal("unchanged recovery state was repeatedly persisted", len(persisted))
+	}
+	before, err := recovered.ReadOutput("x", r.ID, 0, MaxLogRead)
+	if err != nil || !strings.Contains(string(before.Data), "ready:") {
+		t.Fatal("restored logs unavailable", before, err)
+	}
 	if _, err := owned.Stop("x"); err != nil {
 		t.Fatal(err)
 	}
 	wait(t, owned, "x", r)
+	cleared := recovered.State().Commands[0].Run
+	if cleared.ID != r.ID || cleared.Identity != r.Identity || cleared.Lifecycle != model.Exited || cleared.Outcome != nil || cleared.EndedAt != nil || cleared.StopRequested {
+		t.Fatal("cleanup did not clear the stale run without fabricating an outcome", cleared)
+	}
+	if len(persisted) != 2 || persisted[1].Lifecycle != model.Exited {
+		t.Fatal("cleanup transition was not persisted", persisted)
+	}
+	for range 3 {
+		recovered.State()
+	}
+	if len(persisted) != 2 {
+		t.Fatal("completed recovery state was repeatedly persisted", len(persisted))
+	}
+	after, err := recovered.ReadOutput("x", r.ID, 0, MaxLogRead)
+	if err != nil || string(after.Data) != string(before.Data) || after.Error != before.Error {
+		t.Fatal("cleanup changed retained logs or lost the incomplete-tail warning", before, after, err)
+	}
 	reconciled, err := ReconcileRecorded(r)
 	if err != nil || reconciled.Lifecycle != model.Exited || reconciled.Outcome != nil || reconciled.EndedAt != nil {
 		t.Fatalf("fabricated outcome or retained stale execution: %+v %v", reconciled, err)

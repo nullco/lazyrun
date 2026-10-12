@@ -443,6 +443,37 @@ services:
 	if !sameProcess(r.Identity) {
 		t.Fatal("recovery killed/replaced the unmanaged process")
 	}
+	retained := f.logs("stubborn", r)
+	// Manual cleanup belongs to the test harness, not the recovered supervisor.
+	if err := unix.Kill(-r.Identity.PGID, unix.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	eventuallyIntegration(t, func() bool {
+		for {
+			var status unix.WaitStatus
+			pid, _ := unix.Wait4(-r.Identity.PGID, &status, unix.WNOHANG, nil)
+			if pid <= 0 {
+				break
+			}
+		}
+		return errors.Is(unix.Kill(-r.Identity.PGID, 0), unix.ESRCH)
+	})
+	cleared := findRun(f.state(), "stubborn")
+	if cleared.ID != r.ID || cleared.Lifecycle != model.Exited || cleared.Outcome != nil || cleared.EndedAt != nil {
+		t.Fatal("recovered supervisor did not notice cleanup or fabricated an outcome", cleared)
+	}
+	if f.logs("stubborn", r) != retained {
+		t.Fatal("manual cleanup discarded retained logs")
+	}
+	hello, err := f.connection.Client.Hello(context.Background())
+	if err != nil || hello.Supervisor != f.connection.Hello.Supervisor {
+		t.Fatal("cleanup required another supervisor restart", hello, err)
+	}
+	fresh := f.start("stubborn", nil)
+	if fresh.ID == r.ID {
+		t.Fatal("cleanup did not allow a fresh launch")
+	}
+	f.ready("stubborn", fresh)
 }
 
 func TestFinishedRunMetadataSurvivesSupervisorReplacement(t *testing.T) {

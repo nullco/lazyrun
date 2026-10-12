@@ -133,6 +133,7 @@ func (m *Manager) Start(alias string, env []string) (model.Run, error) {
 }
 
 func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
+	m.reconcileRecordedLocked(s)
 	if s.run.Lifecycle.Active() {
 		if s.cmd == nil {
 			return s.run.Clone(), ErrUnmanaged
@@ -236,6 +237,7 @@ func (m *Manager) Stop(alias string) (model.Run, error) {
 }
 
 func (m *Manager) stopLocked(s *slot) error {
+	m.reconcileRecordedLocked(s)
 	if !s.run.Lifecycle.Active() {
 		return ErrNoActiveRun
 	}
@@ -271,6 +273,7 @@ func (m *Manager) Restart(alias string, env []string) (model.Run, error) {
 		s.mu.Unlock()
 		return r, ErrRemoved
 	}
+	m.reconcileRecordedLocked(s)
 	if s.run.Lifecycle.Active() && s.cmd == nil {
 		r := s.run.Clone()
 		s.mu.Unlock()

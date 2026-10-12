@@ -89,6 +89,7 @@ func (m *Manager) ProjectSummary() model.ProjectSummary {
 	return model.ProjectSummary{ID: m.project.ID, Name: m.project.Name, Root: m.project.Root}
 }
 
+// State rechecks unowned groups before returning their latest recovery status.
 func (m *Manager) State() model.State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -98,6 +99,7 @@ func (m *Manager) State() model.State {
 		s := m.slots[alias]
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		m.reconcileRecordedLocked(s)
 		if removed && !s.run.Lifecycle.Active() {
 			return
 		}
@@ -151,7 +153,8 @@ func (m *Manager) Restore(runs []model.Run) error {
 		}
 		s.diskOutput = m.opts.LogStore.Restore(r.Definition.Alias, r.ID, r.LogMaxBytes, r.LogEnd, problem)
 		s.done = make(chan struct{})
-		// There is no future collector/reaper for a historical run, even if unknown.
+		// There is no collector/reaper for a historical run. Reads and lifecycle
+		// requests only recheck whether its recorded group has disappeared.
 		close(s.done)
 		if err := m.persistLocked(s); err != nil {
 			return err
