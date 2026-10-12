@@ -5,6 +5,7 @@ package gui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -78,6 +79,7 @@ type dashboard struct {
 	cancel                     context.CancelFunc
 	workers                    sync.WaitGroup
 	events                     chan event
+	wake                       chan struct{}
 	jobs                       chan logJob
 	state                      model.State
 	connected                  bool
@@ -110,7 +112,7 @@ type dashboard struct {
 func newDashboard(ctx context.Context, client Client, state model.State, opts Options) *dashboard {
 	ctx, cancel := context.WithCancel(ctx)
 	d := &dashboard{client: client, opts: opts, ctx: ctx, cancel: cancel,
-		events: make(chan event, 16), jobs: make(chan logJob, 1), state: state,
+		events: make(chan event, 16), wake: make(chan struct{}, 1), jobs: make(chan logJob, 1), state: state,
 		navigation: navigation{searchJobs: make(chan searchJob, 1), matchIndex: -1},
 		connected:  true, focus: projectPane, owner: projectPane, follow: true}
 	d.opts.Environment = append([]string(nil), opts.Environment...)
@@ -139,34 +141,12 @@ func Run(ctx context.Context, client Client, opts Options) error {
 	if err := d.bindings(g); err != nil {
 		return err
 	}
+	// Draw the already-loaded state without waiting for another RPC to finish.
+	d.send(d.ctx, event{})
 	d.spawn(d.pollState)
 	d.spawn(d.pollLogs)
 	d.spawn(d.pollSearch)
-	// Exactly one outstanding UI wakeup, with an acknowledgement. gocui's
-	// Update otherwise creates a goroutine per call and cannot cancel its queue.
-	d.spawn(func() {
-		defer func() {
-			if d.ctx.Err() != nil {
-				g.UpdateAsync(func(*gocui.Gui) error { return gocui.ErrQuit })
-			}
-		}()
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-d.ctx.Done():
-				return
-			case <-ticker.C:
-			}
-			ack := make(chan struct{})
-			g.UpdateAsync(func(*gocui.Gui) error { defer close(ack); d.drain(); return nil })
-			select {
-			case <-d.ctx.Done():
-				return
-			case <-ack:
-			}
-		}
-	})
+	d.spawn(func() { d.updateLoop(g.UpdateAsync) })
 	err = g.MainLoop()
 	if err == gocui.ErrQuit {
 		return nil
@@ -180,6 +160,10 @@ func (d *dashboard) send(ctx context.Context, e event) bool {
 	case <-ctx.Done():
 		return false
 	case d.events <- e:
+		select {
+		case d.wake <- struct{}{}:
+		default:
+		}
 		return true
 	}
 }
@@ -194,11 +178,20 @@ func wait(ctx context.Context, delay time.Duration) bool {
 	}
 }
 func (d *dashboard) pollState() {
+	var previous model.State
+	var previousErr error
+	havePrevious := false
 	for {
 		ctx, cancel := context.WithTimeout(d.ctx, 2*time.Second)
 		state, err := d.client.State(ctx)
 		cancel()
-		if !d.send(d.ctx, event{state: &state, err: err}) || !wait(d.ctx, 400*time.Millisecond) {
+		if !havePrevious || !sameError(previousErr, err) || err == nil && !reflect.DeepEqual(previous, state) {
+			if !d.send(d.ctx, event{state: &state, err: err}) {
+				return
+			}
+			previous, previousErr, havePrevious = state, err, true
+		}
+		if !wait(d.ctx, 400*time.Millisecond) {
 			return
 		}
 	}
@@ -209,6 +202,9 @@ func (d *dashboard) pollLogs() {
 		case <-d.ctx.Done():
 			return
 		case job := <-d.jobs:
+			var previous model.LogRead
+			var previousErr error
+			havePrevious := false
 			for job.ctx.Err() == nil {
 				ctx, cancel := context.WithTimeout(job.ctx, 2*time.Second)
 				var r model.LogRead
@@ -221,8 +217,12 @@ func (d *dashboard) pollLogs() {
 					r, err = d.client.Logs(ctx, job.alias, job.runID, job.after, 64*1024)
 				}
 				cancel()
-				if !d.send(job.ctx, event{read: &r, err: err, generation: job.generation, initial: job.initial, after: job.after, window: job.window, anchor: job.after, delta: job.delta}) {
-					break
+				if job.window || !havePrevious || !sameError(previousErr, err) || err == nil && (job.initial || logReadChanged(previous, r)) {
+					if !d.send(job.ctx, event{read: &r, err: err, generation: job.generation, initial: job.initial, after: job.after, window: job.window, anchor: job.after, delta: job.delta}) {
+						break
+					}
+					previous, previousErr, havePrevious = r, err, true
+					previous.Data, previous.Records = nil, nil
 				}
 				if job.window {
 					break
@@ -239,6 +239,7 @@ func (d *dashboard) pollLogs() {
 	}
 }
 func (d *dashboard) drain() {
+drain:
 	for range cap(d.events) {
 		select {
 		case e := <-d.events:
@@ -282,29 +283,40 @@ func (d *dashboard) drain() {
 				}
 				d.logError = singleLine(e.read.Error)
 				d.unavailable = e.read.Unavailable
-				dropped := d.buffer.consume(*e.read, e.after, e.initial)
-				if item, ok := d.current(); ok && item.Run.Outcome != nil && e.read.Next >= item.Run.LogEnd {
-					if text := d.buffer.filter.Finish(); text != "" {
-						dropped += d.buffer.append([]byte(text), time.Time{})
-					}
-				}
-				if !d.follow {
-					if dropped > d.top {
-						d.wrapTop = 0
-					}
-					d.top = max(0, d.top-dropped)
-				}
+				d.trimLogView(d.buffer.consume(*e.read, e.after, e.initial))
 				d.cursor = e.read.Next
 				d.streamFirst, d.streamEnd = e.read.First, e.read.End
 				d.loaded = true
 			}
 		default:
-			d.syncLogView()
-			return
+			break drain
 		}
 	}
 	d.syncLogView()
+	d.finishLogs()
 }
+
+func (d *dashboard) trimLogView(dropped int) {
+	if !d.follow {
+		if dropped > d.top {
+			d.wrapTop = 0
+		}
+		d.top = max(0, d.top-dropped)
+	}
+}
+
+// An exit-state update must finish pending UTF-8/escape parsing even when the
+// log worker suppresses an unchanged empty response at the final cursor.
+func (d *dashboard) finishLogs() {
+	item, ok := d.current()
+	if !ok || !d.loaded || item.Run.ID != d.logRun || item.Run.Outcome == nil || d.cursor < item.Run.LogEnd {
+		return
+	}
+	if text := d.buffer.filter.Finish(); text != "" {
+		d.trimLogView(d.buffer.append([]byte(text), time.Time{}))
+	}
+}
+
 func (d *dashboard) notify(text string) {
 	d.notice = singleLine(text)
 }
