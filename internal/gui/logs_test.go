@@ -40,8 +40,11 @@ func TestLogBufferPartialLinesColorsTimestampsAndGaps(t *testing.T) {
 }
 func TestLogBufferIndependentByteAndLineBounds(t *testing.T) {
 	var b logBuffer
-	for range 40 {
-		b.append([]byte(strings.Repeat("€", 32768)), time.Time{})
+	chunk := []byte(strings.Repeat("€", 32768))
+	// Cross the byte limit twice without repeatedly rescanning megabytes of
+	// already-evicted text under the race detector.
+	for range MaxBufferBytes/len(chunk) + 2 {
+		b.append(chunk, time.Time{})
 		if b.bytes > MaxBufferBytes {
 			t.Fatal(b.bytes)
 		}

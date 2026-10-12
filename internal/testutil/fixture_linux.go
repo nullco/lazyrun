@@ -23,7 +23,10 @@ func FixtureCommand(mode string) (string, error) {
 		return "", err
 	}
 	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
-	return "exec " + quote(exe) + " -test.run=^TestProcessFixture$ -- lazyrun-fixture " + quote(mode), nil
+	// These helpers finish their work before exit. Avoid the race runtime's
+	// one-second exit delay, including tests with an empty request environment.
+	race := "GORACE=" + strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0")
+	return "exec /usr/bin/env " + quote(race) + " " + quote(exe) + " -test.run=^TestProcessFixture$ -- lazyrun-fixture " + quote(mode), nil
 }
 
 // RunFixture returns in the regular test runner and exits directly in a helper

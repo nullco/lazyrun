@@ -42,10 +42,16 @@ def health():
 
 
 @celery.task(name="lazyrun.smoke.slow_job")
-def slow_job(seconds, token):
+def slow_job(seconds, token, wait_for_release=False):
     identity = {"pid": os.getpid(), "pgid": os.getpgrp(), "token": token}
     (root / f"started-{token}.json").write_text(json.dumps(identity))
     print(f"smoke task {token} started", flush=True)
+    if wait_for_release:
+        deadline = time.monotonic() + 30
+        while not (root / f"release-{token}").exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("test did not release the task")
+            time.sleep(0.05)
     time.sleep(seconds)
     (root / f"done-{token}.json").write_text(json.dumps(identity))
     print(f"smoke task {token} finished", flush=True)
@@ -56,6 +62,7 @@ if __name__ == "__main__":
     parser.add_argument("action", choices=("serve", "enqueue", "wait-idle"))
     parser.add_argument("--seconds", type=float, default=1)
     parser.add_argument("--token", default="manual")
+    parser.add_argument("--wait-for-release", action="store_true")
     args = parser.parse_args()
     if args.action == "serve":
         app.run(
@@ -79,5 +86,5 @@ if __name__ == "__main__":
         else:
             raise SystemExit("worker did not acknowledge an idle pool")
     else:
-        result = slow_job.delay(args.seconds, args.token)
+        result = slow_job.delay(args.seconds, args.token, args.wait_for_release)
         print(f"queued {result.id}", flush=True)

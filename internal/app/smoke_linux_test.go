@@ -214,9 +214,13 @@ func TestSmokeFlaskRealReloaderReconnectRestartAndStop(t *testing.T) {
 	}
 }
 
-func enqueueSmoke(t *testing.T, f *integration, python, pool string, seconds int, token string) {
+func enqueueSmoke(t *testing.T, f *integration, python, pool string, seconds int, token string, gated bool) {
 	t.Helper()
-	f.write(fmt.Sprintf("version: 1\nlogs: {maxBytes: 1048576}\nservices:\n  worker:\n    command: %q\n    restart_timeout: 3s\ntasks:\n  enqueue:\n    command: %q\n", shellQuote(python)+" -m celery -A smoke_app.celery worker --pool="+pool+" --concurrency=2 --loglevel=INFO --without-gossip --without-mingle --without-heartbeat", shellQuote(python)+fmt.Sprintf(" -u smoke_app.py enqueue --seconds %d --token %s", seconds, token)))
+	gateFlag := ""
+	if gated {
+		gateFlag = " --wait-for-release"
+	}
+	f.write(fmt.Sprintf("version: 1\nlogs: {maxBytes: 1048576}\nservices:\n  worker:\n    command: %q\n    restart_timeout: 3s\ntasks:\n  enqueue:\n    command: %q\n", shellQuote(python)+" -m celery -A smoke_app.celery worker --pool="+pool+" --concurrency=2 --loglevel=INFO --without-gossip --without-mingle --without-heartbeat", shellQuote(python)+fmt.Sprintf(" -u smoke_app.py enqueue --seconds %d --token %s%s", seconds, token, gateFlag)))
 	c := f.connect(f.root)
 	c.Close()
 	task := f.start("enqueue", os.Environ())
@@ -261,7 +265,7 @@ func TestSmokeCeleryPreforkAndThreadsGracefulShutdown(t *testing.T) {
 	if len(smokeGroup(t, run.Identity.PGID)) < 4 {
 		t.Fatal("Celery prefork pool missing", smokeGroup(t, run.Identity.PGID))
 	}
-	enqueueSmoke(t, f, python, "prefork", 1, "warm")
+	enqueueSmoke(t, f, python, "prefork", 1, "warm", false)
 	var running smokeIdentity
 	smokeEventually(t, f, "prefork task start", func() bool { var ok bool; running, ok = smokeTaskIdentity(f.root, "started", "warm"); return ok })
 	if running.PGID != run.Identity.PGID || running.PID == run.Identity.PID {
@@ -278,7 +282,18 @@ func TestSmokeCeleryPreforkAndThreadsGracefulShutdown(t *testing.T) {
 	}
 	// Real Celery threads-pool tasks stay inside the worker process. Unlike
 	// prefork children, they are not separately terminated by group SIGTERM.
-	enqueueSmoke(t, f, python, "threads", 6, "blocked")
+	// Keep the task alive until the restart has actually timed out, rather
+	// than assuming a six-second sleep outlasts scheduling and IPC delays.
+	enqueueSmoke(t, f, python, "threads", 0, "blocked", true)
+	data, err := os.ReadFile(filepath.Join(f.root, "lazyrun.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "restart_timeout: 3s", "restart_timeout: 500ms", 1))
+	f.write(string(data))
+	if err := f.connection.Client.Sync(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
 	run = f.start("worker", os.Environ())
 	smokeEventually(t, f, "threads Celery readiness", func() bool { return strings.Contains(f.logs("worker", run), "ready.") })
 	smokeEventually(t, f, "long threads task start", func() bool { _, ok := smokeTaskIdentity(f.root, "started", "blocked"); return ok })
@@ -288,6 +303,12 @@ func TestSmokeCeleryPreforkAndThreadsGracefulShutdown(t *testing.T) {
 	}
 	if _, err := f.connection.Client.Start(context.Background(), "worker", os.Environ()); !remoteCode(err, transport.CodeAlreadyRunning) {
 		t.Fatal("overlap admitted while pool task was alive", err)
+	}
+	if _, ok := smokeTaskIdentity(f.root, "done", "blocked"); ok {
+		t.Fatal("gated task finished before being released")
+	}
+	if err := os.WriteFile(filepath.Join(f.root, "release-blocked"), nil, 0600); err != nil {
+		t.Fatal(err)
 	}
 	assertSmokeFinished(t, f, "worker", run)
 	if _, ok := smokeTaskIdentity(f.root, "done", "blocked"); !ok {

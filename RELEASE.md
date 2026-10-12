@@ -3,10 +3,17 @@
 ## How it works
 
 Pushing a version tag starts `.github/workflows/release.yml` on that exact
-revision. It reuses the normal CI workflow to run offline installer tests,
-formatting, vet, race tests, fuzzing, Flask/Celery smoke tests, and the vulnerability audit. Only after every
-gate passes does it build Linux amd64/arm64 packages, verify them, and upload
-archives and SHA-256 checksums to a **draft GitHub Release**.
+revision. It calls the CI workflow with `full: true` to run offline installer
+tests, formatting, vet, race tests, 30 seconds per fuzz target, Flask/Celery smoke
+tests, and the vulnerability audit. Only after every gate passes does it build
+Linux amd64/arm64 packages, verify them, and upload archives and SHA-256 checksums
+to a **draft GitHub Release**.
+
+Routine CI runs on pull requests and pushes to `main`, not on both a feature
+branch push and its PR. It runs the same tests, smoke checks, and audit, with five
+seconds per fuzz target and no packaging. Superseded branch/PR runs are canceled;
+release-tag runs are not. Weekly and default manual runs use the full gates.
+Go caches are isolated by job and updated per commit; Python downloads are cached.
 
 Publishing is a separate, manual action. A failed gate leaves the Git tag in
 place but does not create a release. An upload failure can leave a partial draft;
