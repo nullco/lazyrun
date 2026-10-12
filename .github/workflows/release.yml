@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       version: ${{ steps.tag.outputs.version }}
@@ -35,10 +35,11 @@ jobs:
     uses: ./.github/workflows/check.yml
     with:
       version: ${{ needs.validate.outputs.version }}
+      full: true
 
   draft:
     needs: [validate, gates]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write

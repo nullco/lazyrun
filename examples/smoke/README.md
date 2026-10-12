@@ -32,8 +32,9 @@ race-instrumented lazyrun executable, and verify:
 - Real Celery tasks execute inside prefork children. A real `inspect active`
   acknowledgement fences parent-side completion before the idle-pool stop; a
   child's done marker alone is too early (the parent may still await its result).
-- A busy threads-pool worker finishes its task on SIGTERM; a restart exceeding
-  a configured three-second wait is canceled, never force-killed or started later.
+- A gated threads-pool task remains alive until the test releases it. A restart
+  exceeding a configured short wait is canceled, never force-killed or started
+  later. This checks cancellation without relying on task-duration timing.
 - Reloading `restart_timeout` to 15 seconds lets a busy threads-pool worker finish
   its task before the replacement starts, without rewriting the old run's definition.
 - A busy default prefork worker receives SIGTERM in its children, reports their

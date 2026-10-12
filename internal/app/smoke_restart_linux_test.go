@@ -15,7 +15,7 @@ import (
 func TestSmokeCeleryThreadsRestartAllowsLongerGracefulShutdown(t *testing.T) {
 	python := smokePython(t)
 	f := smokeProject(t, python)
-	enqueueSmoke(t, f, python, "threads", 6, "restart")
+	enqueueSmoke(t, f, python, "threads", 6, "restart", false)
 	old := f.start("worker", os.Environ())
 	smokeEventually(t, f, "threads worker readiness", func() bool { return strings.Contains(f.logs("worker", old), "ready.") })
 	var running smokeIdentity

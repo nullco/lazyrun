@@ -19,7 +19,7 @@ func TestSmokeCeleryBusyPreforkGroupTERM(t *testing.T) {
 	f := smokeProject(t, python)
 	run := f.start("worker", os.Environ())
 	smokeEventually(t, f, "busy prefork readiness", func() bool { return strings.Contains(f.logs("worker", run), "ready.") })
-	enqueueSmoke(t, f, python, "prefork", 6, "prefork-term")
+	enqueueSmoke(t, f, python, "prefork", 6, "prefork-term", false)
 	smokeEventually(t, f, "busy prefork child", func() bool { _, ok := smokeTaskIdentity(f.root, "started", "prefork-term"); return ok })
 	blocked, err := f.connection.Client.Restart(context.Background(), "worker", os.Environ())
 	if !remoteCode(err, transport.CodeRestartBlocked) || blocked.ID != run.ID {
