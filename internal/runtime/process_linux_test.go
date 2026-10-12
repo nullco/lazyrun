@@ -74,7 +74,7 @@ func TestSIGCHLDTracksDescendantAfterLeaderExit(t *testing.T) {
 		p, err := readStat(r.Identity.PID)
 		return err == nil && p.state == 'Z'
 	})
-	state, err := m.Snapshot("x")
+	state, err := snapshot(m, "x")
 	if err != nil || state.Lifecycle != model.Running {
 		t.Fatalf("finished while descendant was alive: %+v %v", state, err)
 	}
@@ -104,7 +104,7 @@ func TestSIGCHLDReapsOrphansWhileLeaderLives(t *testing.T) {
 		_, err := readStat(child)
 		return os.IsNotExist(err)
 	})
-	state, err := m.Snapshot("x")
+	state, err := snapshot(m, "x")
 	if err != nil || state.Lifecycle != model.Running {
 		t.Fatalf("leader stopped during orphan reaping: %+v %v", state, err)
 	}

@@ -229,7 +229,7 @@ func (f *integration) cleanup() {
 	}
 	// The launcher's Cmd.Wait goroutine reaps supervisor leaders.
 	time.Sleep(30 * time.Millisecond)
-	paths, err := supervisor.OpenPaths(model.ProjectID(f.root))
+	paths, err := supervisor.OpenSharedPaths()
 	if err == nil {
 		defer paths.Close()
 		if b, err := paths.State.Read("diagnostic.log", 2*1024*1024); err == nil && strings.Contains(string(b), "DATA RACE") {
@@ -385,8 +385,8 @@ func TestConfigSynchronizationAndProjectIsolation(t *testing.T) {
 	}
 	otherClient := f.connect(other)
 	defer otherClient.Close()
-	if otherClient.Hello.Supervisor.PID == f.connection.Hello.Supervisor.PID {
-		t.Fatal("projects shared supervisor")
+	if otherClient.Hello.Supervisor != f.connection.Hello.Supervisor {
+		t.Fatal("projects did not share supervisor")
 	}
 	otherRun, err := otherClient.Client.Start(context.Background(), "pulse", nil)
 	if err != nil {
@@ -443,6 +443,37 @@ services:
 	if !sameProcess(r.Identity) {
 		t.Fatal("recovery killed/replaced the unmanaged process")
 	}
+	retained := f.logs("stubborn", r)
+	// Manual cleanup belongs to the test harness, not the recovered supervisor.
+	if err := unix.Kill(-r.Identity.PGID, unix.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	eventuallyIntegration(t, func() bool {
+		for {
+			var status unix.WaitStatus
+			pid, _ := unix.Wait4(-r.Identity.PGID, &status, unix.WNOHANG, nil)
+			if pid <= 0 {
+				break
+			}
+		}
+		return errors.Is(unix.Kill(-r.Identity.PGID, 0), unix.ESRCH)
+	})
+	cleared := findRun(f.state(), "stubborn")
+	if cleared.ID != r.ID || cleared.Lifecycle != model.Exited || cleared.Outcome != nil || cleared.EndedAt != nil {
+		t.Fatal("recovered supervisor did not notice cleanup or fabricated an outcome", cleared)
+	}
+	if f.logs("stubborn", r) != retained {
+		t.Fatal("manual cleanup discarded retained logs")
+	}
+	hello, err := f.connection.Client.Hello(context.Background())
+	if err != nil || hello.Supervisor != f.connection.Hello.Supervisor {
+		t.Fatal("cleanup required another supervisor restart", hello, err)
+	}
+	fresh := f.start("stubborn", nil)
+	if fresh.ID == r.ID {
+		t.Fatal("cleanup did not allow a fresh launch")
+	}
+	f.ready("stubborn", fresh)
 }
 
 func TestFinishedRunMetadataSurvivesSupervisorReplacement(t *testing.T) {

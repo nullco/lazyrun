@@ -13,6 +13,24 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// reconcileRecordedLocked refreshes unowned runs on reads and lifecycle requests.
+// Only proven group absence clears the blocker; no process becomes owned here.
+func (m *Manager) reconcileRecordedLocked(s *slot) {
+	if s.cmd != nil || !s.run.Lifecycle.Active() {
+		return
+	}
+	r, err := ReconcileRecorded(s.run)
+	if err != nil {
+		r.Lifecycle = model.Unknown
+		r.Error = fmt.Sprintf("cannot reconcile recorded run: %v; %s", err, ErrUnmanaged)
+	}
+	if r.Lifecycle == s.run.Lifecycle && r.Error == s.run.Error {
+		return
+	}
+	s.run = r
+	m.persistLocked(s)
+}
+
 // ReconcileRecorded only observes. It never terminates/reaps/adopts a recorded
 // PID. Signal zero is an existence probe, not permission for a future signal.
 func ReconcileRecorded(saved model.Run) (model.Run, error) {

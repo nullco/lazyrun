@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"go.yaml.in/yaml/v3"
@@ -23,6 +24,8 @@ const (
 	MaxConfigBytes = 1024 * 1024
 	MinimalExample = "version: 1\nservices:\n  api:\n    command: .venv/bin/python -u -m flask run\ntasks:\n  tests:\n    command: .venv/bin/python -m pytest\n"
 )
+
+var ErrNotFound = errors.New("no " + Filename + " found")
 
 // Discover walks the physical directory hierarchy. Symlinked invocation paths
 // and invocations from subdirectories therefore share a canonical identity.
@@ -51,7 +54,7 @@ func Discover(dir string) (string, error) {
 		}
 		parent := filepath.Dir(root)
 		if parent == root {
-			return "", fmt.Errorf("no %s found in %s or its parents; create a trusted configuration, for example:\n\n%s", Filename, dir, MinimalExample)
+			return "", fmt.Errorf("%w in %s or its parents; create a trusted configuration, for example:\n\n%s", ErrNotFound, dir, MinimalExample)
 		}
 		root = parent
 	}
@@ -186,7 +189,7 @@ func Parse(data []byte, root string) (model.Project, error) {
 			}
 			seen[alias] = section.name
 			path := section.name + "." + alias
-			f, err := mapping(n.Content[i+1], path, "command", "cwd", "env")
+			f, err := mapping(n.Content[i+1], path, "command", "cwd", "env", "restart_timeout")
 			if err != nil {
 				return model.Project{}, err
 			}
@@ -194,10 +197,20 @@ func Parse(data []byte, root string) (model.Project, error) {
 			if !ok {
 				return model.Project{}, at(n.Content[i+1], "%s.command is required", path)
 			}
-			d := model.Definition{Alias: alias, Kind: section.kind, Cwd: root}
+			d := model.Definition{Alias: alias, Kind: section.kind, Cwd: root, RestartTimeout: model.DefaultRestartTimeout}
 			d.Command, err = text(command, path+".command", true)
 			if err != nil {
 				return model.Project{}, err
+			}
+			if timeout, ok := f["restart_timeout"]; ok {
+				value, err := text(timeout, path+".restart_timeout", true)
+				if err != nil {
+					return model.Project{}, err
+				}
+				d.RestartTimeout, err = time.ParseDuration(value)
+				if err != nil || d.RestartTimeout <= 0 {
+					return model.Project{}, at(timeout, "%s.restart_timeout must be a positive duration (for example 30s or 2m)", path)
+				}
 			}
 			if cwd, ok := f["cwd"]; ok {
 				d.Cwd, err = text(cwd, path+".cwd", true)

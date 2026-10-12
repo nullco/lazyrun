@@ -33,7 +33,9 @@ race-instrumented lazyrun executable, and verify:
   acknowledgement fences parent-side completion before the idle-pool stop; a
   child's done marker alone is too early (the parent may still await its result).
 - A busy threads-pool worker finishes its task on SIGTERM; a restart exceeding
-  lazyrun's three-second wait is canceled, never force-killed or started later.
+  a configured three-second wait is canceled, never force-killed or started later.
+- Reloading `restart_timeout` to 15 seconds lets a busy threads-pool worker finish
+  its task before the replacement starts, without rewriting the old run's definition.
 - A busy default prefork worker receives SIGTERM in its children, reports their
   loss, and can abort its task despite printing `Warm shutdown` in the parent.
 

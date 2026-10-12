@@ -36,7 +36,7 @@ func metadataName(alias string) string {
 func (s *store) Save(run model.Run) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if run.ProjectID != s.projectID || run.ID == "" || run.Definition.Alias == "" {
+	if run.ProjectID != s.projectID || run.ID == "" || run.Definition.Alias == "" || run.LogMaxBytes <= 0 {
 		return errors.New("invalid run metadata")
 	}
 	data, err := json.Marshal(record{Version: metadataVersion, Run: run})
@@ -59,7 +59,7 @@ func (s *store) Load() ([]model.Run, error) {
 		if strings.HasPrefix(name, ".tmp-") {
 			continue
 		} // Never unlink arbitrary leftover files.
-		if name == "diagnostic.log" || name == "state.lock" || name == "logs" {
+		if name == "state.lock" || name == "logs" {
 			continue
 		}
 		if !strings.HasSuffix(name, ".json") {
@@ -73,7 +73,7 @@ func (s *store) Load() ([]model.Run, error) {
 		if err := json.Unmarshal(b, &rec); err != nil {
 			return nil, fmt.Errorf("invalid metadata %s: %w", name, err)
 		}
-		if rec.Version != metadataVersion || rec.Run.ProjectID != s.projectID || rec.Run.ID == "" || rec.Run.Definition.Alias == "" || name != metadataName(rec.Run.Definition.Alias) {
+		if rec.Version != metadataVersion || rec.Run.ProjectID != s.projectID || rec.Run.ID == "" || rec.Run.Definition.Alias == "" || rec.Run.LogMaxBytes <= 0 || name != metadataName(rec.Run.Definition.Alias) {
 			return nil, fmt.Errorf("incompatible or invalid metadata %s; manual inspection required", name)
 		}
 		switch rec.Run.Lifecycle {

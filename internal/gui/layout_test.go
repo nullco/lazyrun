@@ -24,11 +24,15 @@ func TestGeometryKeepsSeparateAdjacentBordersWithoutBlankGaps(t *testing.T) {
 			}
 			for _, name := range []string{"project", "services", "tasks", "detail"} {
 				r := areas[name]
-				if r.x0 < 0 || r.y0 < 0 || r.x1 >= width || r.y1 >= height || r.x1-r.x0-1 < 1 || r.y1-r.y0-1 < 2 {
+				minRows := 2
+				if name == "project" {
+					minRows = 1
+				}
+				if r.x0 < 0 || r.y0 < 0 || r.x1 >= width || r.y1 >= height || r.x1-r.x0-1 < 1 || r.y1-r.y0-1 < minRows {
 					t.Fatalf("%dx%d: unusable framed pane %s: %+v", width, height, name, r)
 				}
 			}
-			if project.y1-project.y0-1 != 2 || tasks.y1 != detail.y1 || detail.y1 != height-2 {
+			if project.y1-project.y0-1 != 1 || tasks.y1 != detail.y1 || detail.y1 != height-2 {
 				t.Fatalf("%dx%d: project/footer space changed: %+v", width, height, areas)
 			}
 			if areas["footer"].y0 != detail.y1 || areas["footer"].y1-areas["footer"].y0-1 != 1 || areas["footer"].y0+1 != height-1 {
@@ -38,7 +42,7 @@ func TestGeometryKeepsSeparateAdjacentBordersWithoutBlankGaps(t *testing.T) {
 	}
 }
 
-func TestProjectPaneShowsNameAndConnectionWithPathInDetails(t *testing.T) {
+func TestProjectPaneShowsOnlyNameWithConnectionAndPathInDetails(t *testing.T) {
 	g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: 100, Height: 30, OutputMode: gocui.OutputTrue, SupportOverlaps: true})
 	if err != nil {
 		t.Fatal(err)
@@ -47,28 +51,34 @@ func TestProjectPaneShowsNameAndConnectionWithPathInDetails(t *testing.T) {
 	d := testDashboard(t, &fakeClient{})
 	d.state.Project.Root = "/some/very/long/project/location/with/a/name"
 	d.connectionError = "offline"
-	for _, connected := range []bool{true, false} {
-		d.connected = connected
+	for _, state := range []struct {
+		connected, loading bool
+		status             string
+	}{
+		{true, false, "connected"},
+		{true, true, "Loading project..."},
+		{false, false, "DISCONNECTED: offline"},
+	} {
+		d.connected, d.loadingProject = state.connected, state.loading
 		d.setFocus(projectPane)
 		if err := d.layout(g); err != nil {
 			t.Fatal(err)
 		}
-		status := "connected"
-		if !connected {
-			status = "DISCONNECTED: offline"
-		}
 		project, _ := g.View("project")
 		_, height := project.Size()
-		if height != 2 || strings.TrimSuffix(plain(project.Buffer()), "\n") != "demo\n"+status {
-			t.Fatal("project pane must show the name and connection in two rows", project.Buffer(), height)
+		if height != 1 || strings.TrimSuffix(plain(project.Buffer()), "\n") != "demo" {
+			t.Fatal("project pane must show only the name in one row", project.Buffer(), height)
+		}
+		if project.Title != "1 Project" {
+			t.Fatal("project title must not show connection or loading status", project.Title)
 		}
 		d.setFocus(detailPane)
 		if err := d.layout(g); err != nil {
 			t.Fatal(err)
 		}
 		detail, _ := g.View("detail")
-		if !strings.Contains(detail.Buffer(), "Root: "+d.state.Project.Root) {
-			t.Fatal("project Details must retain the full path", detail.Buffer())
+		if !strings.Contains(detail.Buffer(), "Root: "+d.state.Project.Root) || !strings.Contains(detail.Buffer(), "Connection: "+state.status) {
+			t.Fatal("project Details must retain the path and connection status", detail.Buffer())
 		}
 	}
 }

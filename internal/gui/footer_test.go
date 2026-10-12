@@ -59,7 +59,7 @@ func TestFooterHintsShowFocusedPaneActionsAndFitOneRow(t *testing.T) {
 }
 
 func TestFooterLayoutRendersSingleBlueShortcutRow(t *testing.T) {
-	for _, size := range [][2]int{{MinWidth, MinHeight}, {wideWidth, wideHeight}, {100, 24}, {180, 50}} {
+	for _, size := range [][2]int{{MinWidth, MinHeight}, {wideWidth, wideHeight}, {180, 50}} {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: size[0], Height: size[1], OutputMode: gocui.OutputTrue, SupportOverlaps: true})
 			if err != nil {

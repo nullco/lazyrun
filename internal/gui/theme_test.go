@@ -222,14 +222,14 @@ func TestSelectionHighlightFollowsScrollingAndClearsWhenUnfocused(t *testing.T) 
 	v, _ := g.View("services")
 	_, cursorY := v.Cursor()
 	_, height := v.Size()
-	if !v.Highlight || cursorY != height-1 || !strings.Contains(v.Buffer(), "> service-19") {
+	if !v.Highlight || cursorY != height-1 || !strings.Contains(v.Buffer(), "  service-19") || strings.Contains(v.Buffer(), "> ") {
 		t.Fatal("selected row did not track the visible scroll position", v.Buffer(), cursorY)
 	}
 	d.setFocus(detailPane)
 	if err := d.layout(g); err != nil {
 		t.Fatal(err)
 	}
-	if v.Highlight || !strings.Contains(v.Buffer(), "> service-19") {
+	if v.Highlight || !strings.Contains(v.Buffer(), "  service-19") || strings.Contains(v.Buffer(), "> ") {
 		t.Fatal("unfocused owner retained active highlight or lost its selection")
 	}
 }

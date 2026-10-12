@@ -6,7 +6,6 @@
 package runtime
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -38,14 +37,11 @@ var (
 	ErrUnmanaged      = errors.New("run may be unmanaged after supervisor loss; manual cleanup required; no signaling or replacement allowed")
 )
 
-const MaxMemoryOutput = 2 * 1024 * 1024
-
 type Options struct {
-	PollInterval   time.Duration // Fallback reconciliation interval; SIGCHLD drives ordinary checks.
-	RestartTimeout time.Duration
-	DrainTimeout   time.Duration
-	Persist        func(model.Run) error // Called before launch intent and on state transitions.
-	LogStore       *logstore.Store       // nil only for in-process lifecycle fixtures
+	PollInterval time.Duration // Fallback reconciliation interval; SIGCHLD drives ordinary checks.
+	DrainTimeout time.Duration
+	Persist      func(model.Run) error // Called before launch intent and on state transitions.
+	LogStore     *logstore.Store
 }
 
 type Manager struct {
@@ -58,18 +54,16 @@ type Manager struct {
 }
 
 type slot struct {
-	mu                sync.Mutex
-	definition        model.Definition
-	configured        bool
-	shell             string
-	outputLimit       int64
-	run               model.Run
-	cmd               *exec.Cmd
-	output            *memoryOutput
-	diskOutput        *logstore.Output
-	outputUnavailable bool
-	done              chan struct{}
-	pending           bool
+	mu          sync.Mutex
+	definition  model.Definition
+	configured  bool
+	shell       string
+	outputLimit int64
+	run         model.Run
+	cmd         *exec.Cmd
+	diskOutput  *logstore.Output
+	done        chan struct{}
+	pending     bool
 }
 
 // New installs Linux child-subreaping, a process-wide setting required for
@@ -79,14 +73,14 @@ func New(project model.Project, opts Options) (*Manager, error) {
 	if err := validateProject(project); err != nil {
 		return nil, err
 	}
-	if opts.PollInterval < 0 || opts.RestartTimeout < 0 || opts.DrainTimeout < 0 {
+	if opts.LogStore == nil {
+		return nil, errors.New("log store is required")
+	}
+	if opts.PollInterval < 0 || opts.DrainTimeout < 0 {
 		return nil, errors.New("runtime timeouts must not be negative")
 	}
 	if opts.PollInterval == 0 {
 		opts.PollInterval = 5 * time.Second
-	}
-	if opts.RestartTimeout == 0 {
-		opts.RestartTimeout = 3 * time.Second
 	}
 	if opts.DrainTimeout == 0 {
 		opts.DrainTimeout = time.Second
@@ -115,16 +109,6 @@ func (m *Manager) lookup(alias string) (*slot, error) {
 	return s, nil
 }
 
-func (m *Manager) Snapshot(alias string) (model.Run, error) {
-	s, err := m.lookup(alias)
-	if err != nil {
-		return model.Run{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return snapshotLocked(s), nil
-}
-
 func snapshotLocked(s *slot) model.Run {
 	r := s.run.Clone()
 	if s.diskOutput != nil {
@@ -149,6 +133,7 @@ func (m *Manager) Start(alias string, env []string) (model.Run, error) {
 }
 
 func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
+	m.reconcileRecordedLocked(s)
 	if s.run.Lifecycle.Active() {
 		if s.cmd == nil {
 			return s.run.Clone(), ErrUnmanaged
@@ -166,15 +151,10 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 	if _, err := rand.Read(bytes[:]); err != nil {
 		return s.run.Clone(), fmt.Errorf("create run ID: %w", err)
 	}
-	s.run = model.Run{ID: hex.EncodeToString(bytes[:]), ProjectID: m.projectID, Definition: s.definition.Clone(), Shell: s.shell, Lifecycle: model.Starting, StartedAt: time.Now(), Identity: model.ProcessIdentity{BootID: m.bootID}}
+	s.run = model.Run{ID: hex.EncodeToString(bytes[:]), ProjectID: m.projectID, Definition: s.definition.Clone(), Shell: s.shell, Lifecycle: model.Starting, StartedAt: time.Now(), Identity: model.ProcessIdentity{BootID: m.bootID}, LogMaxBytes: s.outputLimit}
 	if s.diskOutput != nil {
 		s.diskOutput.Release()
 		s.diskOutput = nil
-	}
-	s.output = &memoryOutput{limit: int(min(s.outputLimit, int64(MaxMemoryOutput)))}
-	s.outputUnavailable = false
-	if m.opts.LogStore != nil {
-		s.run.LogMaxBytes = s.outputLimit
 	}
 	s.cmd = nil
 	s.done = make(chan struct{})
@@ -195,10 +175,7 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 	if err := m.persistLocked(s); err != nil {
 		return launchFailure(fmt.Errorf("persist launch intent: %w", err))
 	}
-	if m.opts.LogStore != nil {
-		s.diskOutput = m.opts.LogStore.Create(s.definition.Alias, s.run.ID, s.outputLimit)
-		s.output = nil
-	}
+	s.diskOutput = m.opts.LogStore.Create(s.definition.Alias, s.run.ID, s.outputLimit)
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		return launchFailure(fmt.Errorf("create output pipe: %w", err))
@@ -234,13 +211,9 @@ func (m *Manager) startLocked(s *slot, env []string) (model.Run, error) {
 		s.run.Identity, s.run.Lifecycle = id, model.Running
 	}
 	captureDone := make(chan error, 1)
-	var output io.Writer = s.output
 	diskOutput := s.diskOutput
-	if diskOutput != nil {
-		output = diskOutput
-	}
 	go func() {
-		_, err := io.CopyBuffer(output, reader, make([]byte, 32*1024))
+		_, err := io.CopyBuffer(diskOutput, reader, make([]byte, 32*1024))
 		reader.Close()
 		captureDone <- err
 	}()
@@ -264,6 +237,7 @@ func (m *Manager) Stop(alias string) (model.Run, error) {
 }
 
 func (m *Manager) stopLocked(s *slot) error {
+	m.reconcileRecordedLocked(s)
 	if !s.run.Lifecycle.Active() {
 		return ErrNoActiveRun
 	}
@@ -299,6 +273,7 @@ func (m *Manager) Restart(alias string, env []string) (model.Run, error) {
 		s.mu.Unlock()
 		return r, ErrRemoved
 	}
+	m.reconcileRecordedLocked(s)
 	if s.run.Lifecycle.Active() && s.cmd == nil {
 		r := s.run.Clone()
 		s.mu.Unlock()
@@ -321,8 +296,11 @@ func (m *Manager) Restart(alias string, env []string) (model.Run, error) {
 	}
 	s.pending = true
 	done := s.done
+	// Use the current configuration, captured before a concurrent reload can
+	// change the timeout of an already accepted restart.
+	timeout := s.definition.RestartWait()
 	s.mu.Unlock()
-	deadline := time.Now().Add(m.opts.RestartTimeout)
+	deadline := time.Now().Add(timeout)
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
@@ -342,64 +320,6 @@ func (m *Manager) Restart(alias string, env []string) (model.Run, error) {
 		s.pending = false
 		return s.run.Clone(), ErrRestartBlocked
 	}
-}
-
-// Wait cancels only the caller's wait, not capture or the managed process.
-func (m *Manager) Wait(ctx context.Context, alias, runID string) (model.Run, error) {
-	s, err := m.lookup(alias)
-	if err != nil {
-		return model.Run{}, err
-	}
-	s.mu.Lock()
-	if s.run.ID != runID || runID == "" {
-		s.mu.Unlock()
-		return model.Run{}, ErrRunChanged
-	}
-	done := s.done
-	s.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		return model.Run{}, ctx.Err()
-	case <-done:
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.run.ID != runID {
-			return model.Run{}, ErrRunChanged
-		}
-		return s.run.Clone(), nil
-	}
-}
-
-func (m *Manager) Output(alias, runID string) ([]byte, bool, error) {
-	s, err := m.lookup(alias)
-	if err != nil {
-		return nil, false, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if runID == "" || s.run.ID != runID {
-		return nil, false, ErrRunChanged
-	}
-	if s.diskOutput != nil {
-		var data []byte
-		var after uint64
-		var truncated bool
-		for len(data) < MaxMemoryOutput {
-			read, err := s.diskOutput.Read(after, min(MaxLogRead, MaxMemoryOutput-len(data)))
-			if err != nil {
-				return data, truncated, err
-			}
-			data = append(data, read.Data...)
-			truncated = truncated || read.Truncated
-			if read.Next == after || len(read.Data) == 0 {
-				break
-			}
-			after = read.Next
-		}
-		return data, truncated, nil
-	}
-	data, truncated := s.output.snapshot()
-	return data, truncated, nil
 }
 
 func (m *Manager) monitor(s *slot, reader *os.File, captureDone <-chan error, exits chan os.Signal) {

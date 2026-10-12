@@ -1,5 +1,5 @@
-// Package model contains configuration and run state shared by the runtime and
-// future supervisor/transport/UI. It has no process or terminal dependencies.
+// Package model contains configuration and run state shared by the runtime,
+// supervisor, transport, and UI. It has no process or terminal dependencies.
 package model
 
 import (
@@ -25,12 +25,22 @@ func DefaultLogSettings() LogSettings {
 	return LogSettings{Tail: 1000, MaxBytes: 10 * 1024 * 1024}
 }
 
+const DefaultRestartTimeout = 30 * time.Second
+
 type Definition struct {
-	Alias   string            `json:"alias"`
-	Kind    Kind              `json:"kind"`
-	Command string            `json:"command"`
-	Cwd     string            `json:"cwd"`
-	Env     map[string]string `json:"-"` // Never include environment values in state/metadata.
+	Alias          string            `json:"alias"`
+	Kind           Kind              `json:"kind"`
+	Command        string            `json:"command"`
+	Cwd            string            `json:"cwd"`
+	RestartTimeout time.Duration     `json:"restartTimeout"`
+	Env            map[string]string `json:"-"` // Never include environment values in state/metadata.
+}
+
+func (d Definition) RestartWait() time.Duration {
+	if d.RestartTimeout == 0 {
+		return DefaultRestartTimeout
+	}
+	return d.RestartTimeout
 }
 
 func (d Definition) Clone() Definition {
@@ -53,6 +63,13 @@ type Project struct {
 	Logs       LogSettings  `json:"logs"`
 	Services   []Definition `json:"services"`
 	Tasks      []Definition `json:"tasks"`
+}
+
+// ProjectSummary lists a registered project without exposing its configuration.
+type ProjectSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Root string `json:"root"`
 }
 
 // ProjectID must be given an absolute, symlink-canonicalized project root.

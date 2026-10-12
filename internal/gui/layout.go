@@ -28,7 +28,7 @@ func geometry(width, height int) map[string]rectangle {
 	// Framed coordinates include their borders. Adjacent border cells keep
 	// each pane distinct without an extra blank row or column.
 	const separation = 1
-	projectEnd := 3 // two content rows: name, connection
+	projectEnd := 2 // one content row: selected project name
 	servicesStart := projectEnd + separation
 	servicesEnd := servicesStart + (bottom-servicesStart-separation)/2
 	return map[string]rectangle{
@@ -165,25 +165,36 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	}
 	_ = g.DeleteView("minimum")
 	areas := plan.areas
+	if width >= wideWidth && height >= wideHeight && d.projectListFocused() {
+		left := areas["project"].x1
+		bottom := height - 2
+		projectEnd := 1 + min(len(d.projects), max(2, (height-5)/3))
+		servicesStart := projectEnd + 1
+		servicesEnd := servicesStart + (bottom-servicesStart-1)/2
+		areas["project"] = rectangle{0, 0, left, projectEnd}
+		areas["services"] = rectangle{0, servicesStart, left, servicesEnd}
+		areas["tasks"] = rectangle{0, servicesEnd + 1, left, bottom}
+	}
 	d.collapsed = plan.collapsed
 	connection := "connected"
-	if !d.connected {
+	if d.loadingProject {
+		connection = "Loading project..."
+	} else if !d.connected {
 		connection = "DISCONNECTED: " + d.connectionError
 	}
 	projectTitle := "1 Project"
-	if !d.connected {
-		projectTitle += " - DISCONNECTED"
+	if d.projectListFocused() {
+		projectTitle = fmt.Sprintf("1 Projects (%d)", len(d.projects))
+	}
+	if d.collapsed[projectPane] && len(d.projects) > 1 {
+		projectTitle += ": " + singleLine(d.state.Project.Name)
 	}
 	v, err := paneView(g, "project", projectTitle, areas["project"], d.collapsed[projectPane])
 	if err != nil {
 		return err
 	}
-	connectionStyle := styleGreen
-	if !d.connected {
-		connectionStyle = styleRed
-	}
-	if !d.collapsed[projectPane] {
-		putLines(v, textLines(coloredLabel(singleLine(d.state.Project.Name), "\x1b[1;36m")+"\n"+coloredLabel(connection, connectionStyle)), 0, 0)
+	if err := d.renderProjects(v); err != nil {
+		return err
 	}
 	for _, p := range []pane{servicesPane, tasksPane} {
 		name := paneNames[p]
@@ -195,6 +206,10 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 		clear(d.visibleAliases[p])
 		d.visibleAliases[p] = d.visibleAliases[p][:0]
 		if d.collapsed[p] {
+			continue
+		}
+		if d.loadingProject {
+			putLines(v, textLines("Loading project..."), 0, 0)
 			continue
 		}
 		items := d.items(p)
@@ -209,7 +224,6 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 			prefix := "  "
 			if item.Run.Definition.Alias == d.selected[p] {
 				selected = i
-				prefix = "> "
 			}
 			lines[i].text = prefix + coloredItemLabel(item)
 			if !d.connected {
@@ -263,6 +277,8 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	v.Footer = plain(crop(d.notice, "", 0, max(0, v.InnerWidth()-4)))
 	if d.owner == projectPane {
 		d.showDetails(v, projectDetails(d.state, connection, d.opts.Version))
+	} else if d.loadingProject {
+		putLines(v, textLines("Loading project..."), 0, 0)
 	} else if !ok {
 		putLines(v, textLines("No command selected. Add commands to lazyrun.yml and press R to reload."), 0, 0)
 	} else if d.tab == 1 {

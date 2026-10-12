@@ -28,8 +28,9 @@ type Client interface {
 }
 
 type Options struct {
-	Environment []string
-	Version     string
+	Environment   []string
+	Version       string
+	ProjectClient func(string) Client
 }
 type pane int
 
@@ -51,6 +52,9 @@ type event struct {
 	searchGeneration uint64
 	searchLast       bool
 	state            *model.State
+	projects         []model.ProjectSummary
+	stateGeneration  uint64
+	scopedState      bool
 	read             *model.LogRead
 	err              error
 	generation       uint64
@@ -60,6 +64,7 @@ type event struct {
 	alias            string
 }
 type logJob struct {
+	client       Client
 	window       bool
 	before       int
 	delta        int
@@ -74,6 +79,9 @@ type logJob struct {
 type dashboard struct {
 	navigation
 	client                     Client
+	projects                   []model.ProjectSummary
+	stateScopes                chan stateScope
+	stateGeneration            uint64
 	opts                       Options
 	ctx                        context.Context
 	cancel                     context.CancelFunc
@@ -83,6 +91,7 @@ type dashboard struct {
 	jobs                       chan logJob
 	state                      model.State
 	connected                  bool
+	loadingProject             bool
 	connectionError            string
 	focus, owner               pane
 	selected                   [4]string
@@ -114,7 +123,9 @@ func newDashboard(ctx context.Context, client Client, state model.State, opts Op
 	d := &dashboard{client: client, opts: opts, ctx: ctx, cancel: cancel,
 		events: make(chan event, 16), wake: make(chan struct{}, 1), jobs: make(chan logJob, 1), state: state,
 		navigation: navigation{searchJobs: make(chan searchJob, 1), matchIndex: -1},
-		connected:  true, focus: projectPane, owner: projectPane, follow: true}
+		connected:  true, focus: projectPane, owner: projectPane, follow: true,
+		stateScopes: make(chan stateScope, 1),
+		projects:    []model.ProjectSummary{{ID: state.Project.ID, Name: state.Project.Name, Root: state.Project.Root}}}
 	d.opts.Environment = append([]string(nil), opts.Environment...)
 	d.reselect()
 	return d
@@ -143,7 +154,7 @@ func Run(ctx context.Context, client Client, opts Options) error {
 	}
 	// Draw the already-loaded state without waiting for another RPC to finish.
 	d.send(d.ctx, event{})
-	d.spawn(d.pollState)
+	d.spawn(func() { d.pollState(client) })
 	d.spawn(d.pollLogs)
 	d.spawn(d.pollSearch)
 	d.spawn(func() { d.updateLoop(g.UpdateAsync) })
@@ -177,22 +188,37 @@ func wait(ctx context.Context, delay time.Duration) bool {
 		return true
 	}
 }
-func (d *dashboard) pollState() {
+func (d *dashboard) pollState(initial Client) {
 	var previous model.State
+	var previousProjects []model.ProjectSummary
 	var previousErr error
 	havePrevious := false
+	scope := stateScope{client: initial}
 	for {
 		ctx, cancel := context.WithTimeout(d.ctx, 2*time.Second)
-		state, err := d.client.State(ctx)
+		state, err := scope.client.State(ctx)
+		var projects []model.ProjectSummary
+		if err == nil {
+			if listing, ok := scope.client.(projectLister); ok {
+				projects, err = listing.Projects(ctx)
+			}
+		}
 		cancel()
-		if !havePrevious || !sameError(previousErr, err) || err == nil && !reflect.DeepEqual(previous, state) {
-			if !d.send(d.ctx, event{state: &state, err: err}) {
+		if !havePrevious || !sameError(previousErr, err) || err == nil && (!reflect.DeepEqual(previous, state) || !reflect.DeepEqual(previousProjects, projects)) {
+			if !d.send(d.ctx, event{state: &state, projects: projects, err: err, scopedState: true, stateGeneration: scope.generation}) {
 				return
 			}
-			previous, previousErr, havePrevious = state, err, true
+			previous, previousProjects, previousErr, havePrevious = state, projects, err, true
 		}
-		if !wait(d.ctx, 400*time.Millisecond) {
+		timer := time.NewTimer(400 * time.Millisecond)
+		select {
+		case <-d.ctx.Done():
+			timer.Stop()
 			return
+		case scope = <-d.stateScopes:
+			timer.Stop()
+			havePrevious = false
+		case <-timer.C:
 		}
 	}
 }
@@ -202,6 +228,7 @@ func (d *dashboard) pollLogs() {
 		case <-d.ctx.Done():
 			return
 		case job := <-d.jobs:
+			client := job.client
 			var previous model.LogRead
 			var previousErr error
 			havePrevious := false
@@ -210,11 +237,11 @@ func (d *dashboard) pollLogs() {
 				var r model.LogRead
 				var err error
 				if job.window {
-					r, err = d.client.WindowLogs(ctx, job.alias, job.runID, job.after, job.before, windowBytes)
+					r, err = client.WindowLogs(ctx, job.alias, job.runID, job.after, job.before, windowBytes)
 				} else if job.initial {
-					r, err = d.client.TailLogs(ctx, job.alias, job.runID, job.tail, 64*1024)
+					r, err = client.TailLogs(ctx, job.alias, job.runID, job.tail, 64*1024)
 				} else {
-					r, err = d.client.Logs(ctx, job.alias, job.runID, job.after, 64*1024)
+					r, err = client.Logs(ctx, job.alias, job.runID, job.after, 64*1024)
 				}
 				cancel()
 				if job.window || !havePrevious || !sameError(previousErr, err) || err == nil && (job.initial || logReadChanged(previous, r)) {
@@ -259,12 +286,19 @@ drain:
 					d.notify(e.action + " requested for " + e.alias)
 				}
 			case e.state != nil:
+				if e.scopedState && e.stateGeneration != d.stateGeneration {
+					continue
+				}
+				d.loadingProject = false
 				d.connected = e.err == nil
 				if e.err != nil {
 					d.connectionError = singleLine(e.err.Error())
 				} else {
 					d.connectionError = ""
 					d.state = *e.state
+					if e.projects != nil {
+						d.projects = e.projects
+					}
 					d.reselect()
 				}
 			case e.search != nil && e.searchGeneration == d.searchGeneration:
@@ -321,12 +355,6 @@ func (d *dashboard) notify(text string) {
 	d.notice = singleLine(text)
 }
 
-func displayKind(item model.CommandState) model.Kind {
-	if item.Run.Lifecycle.Active() || item.Removed || item.Definition == nil {
-		return item.Run.Definition.Kind
-	}
-	return item.Definition.Kind
-}
 func (d *dashboard) items(p pane) []model.CommandState {
 	kind := model.Service
 	if p == tasksPane {
@@ -336,7 +364,7 @@ func (d *dashboard) items(p pane) []model.CommandState {
 	}
 	var result []model.CommandState
 	for _, item := range d.state.Commands {
-		if displayKind(item) == kind {
+		if item.DisplayKind() == kind {
 			result = append(result, item)
 		}
 	}
@@ -424,11 +452,15 @@ func (d *dashboard) syncLogView() {
 	if want {
 		ctx, cancel := context.WithCancel(d.ctx)
 		d.viewCancel = cancel
-		d.jobs <- logJob{ctx: ctx, generation: d.generation, alias: alias, runID: runID, after: d.cursor, tail: d.state.Project.Logs.Tail, initial: !d.loaded}
+		d.jobs <- logJob{client: d.client, ctx: ctx, generation: d.generation, alias: alias, runID: runID, after: d.cursor, tail: d.state.Project.Logs.Tail, initial: !d.loaded}
 	}
 }
 func (d *dashboard) action(action string) {
 	if d.help || d.small || d.searchEditing {
+		return
+	}
+	if d.loadingProject {
+		d.notify("Loading project; actions disabled until state arrives")
 		return
 	}
 	item, ok := d.current()
@@ -454,7 +486,7 @@ func (d *dashboard) action(action string) {
 	}
 	alias := item.Run.Definition.Alias
 	label := action
-	if displayKind(item) == model.Task {
+	if item.DisplayKind() == model.Task {
 		if action == "start" {
 			label = "run"
 		} else if action == "restart" {
@@ -463,17 +495,24 @@ func (d *dashboard) action(action string) {
 	}
 	d.busy = true
 	d.notify(label + " pending for " + alias)
+	client := d.client
 	d.spawn(func() {
-		ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
-		defer cancel()
+		ctx := d.ctx
+		if action != "restart" {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+		}
+		// Restart's transport deadline follows the current service timeout;
+		// closing the dashboard still cancels the client's wait.
 		var err error
 		switch action {
 		case "start":
-			_, err = d.client.Start(ctx, alias, d.opts.Environment)
+			_, err = client.Start(ctx, alias, d.opts.Environment)
 		case "stop":
-			_, err = d.client.Stop(ctx, alias)
+			_, err = client.Stop(ctx, alias)
 		case "restart":
-			_, err = d.client.Restart(ctx, alias, d.opts.Environment)
+			_, err = client.Restart(ctx, alias, d.opts.Environment)
 		}
 		d.send(d.ctx, event{action: label, alias: alias, err: err})
 	})
@@ -488,6 +527,15 @@ func (d *dashboard) setFocus(p pane) {
 	d.syncLogView()
 }
 func (d *dashboard) move(delta int) {
+	if d.focus == projectPane {
+		for i, p := range d.projects {
+			if p.ID == d.state.Project.ID {
+				d.selectProject(d.projects[max(0, min(len(d.projects)-1, i+delta))].ID)
+				break
+			}
+		}
+		return
+	}
 	if d.focus == detailPane {
 		if d.owner != projectPane && d.tab == 0 {
 			d.scrollLogs(delta)
@@ -627,6 +675,9 @@ func commandDetails(item model.CommandState) string {
 	r := item.Run
 	var out strings.Builder
 	fmt.Fprintf(&out, "Alias: %s\nKind: %s\nStatus: %s\nRun ID: %s\nPID: %d  PGID: %d\nStop requested: %t\n", singleLine(r.Definition.Alias), singleLine(string(r.Definition.Kind)), outcome(r), singleLine(r.ID), r.Identity.PID, r.Identity.PGID, r.StopRequested)
+	if item.Definition != nil {
+		fmt.Fprintf(&out, "Restart timeout: %s\n", item.Definition.RestartWait())
+	}
 	if !r.StartedAt.IsZero() {
 		fmt.Fprintf(&out, "Started: %s\n", r.StartedAt.Format(time.RFC3339))
 	}

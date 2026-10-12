@@ -1,64 +1,31 @@
 # lazyrun
 
 A terminal dashboard for your project's services and tasks. Linux only.
-Aims to offer a familiar UX inspired by [lazydocker](https://github.com/jesseduffield/lazydocker)
+Inspired by [lazydocker](https://github.com/jesseduffield/lazydocker)
 and [lazygit](https://github.com/jesseduffield/lazygit).
 
-## Features
+- Start, stop, and restart commands from one dashboard.
+- Close the dashboard and reconnect without stopping your commands.
+- Browse and search colored logs.
+- Switch between projects, with keyboard or mouse navigation.
+- Configure commands in `lazyrun.yml`. Nothing starts automatically.
 
-- Start, stop, and restart named commands from one dashboard.
-- Commands keep running when you close the dashboard; reconnect anytime.
-- Wrapped, colored logs with live follow, history paging, and retained-log search.
-- Keyboard and mouse navigation, adaptive pane layouts, and a headless CLI.
-- Per-project configuration in `lazyrun.yml`. Nothing starts automatically.
-
-## Quick start
-
-Requires Linux. Building from source also requires Go 1.25.10 or newer.
-
-### 1. Install
-
-Install the latest stable release with one command:
+## Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nullco/lazyrun/main/scripts/install.sh | sh
 ```
 
-The installer detects Linux amd64/arm64, verifies the archive's SHA-256 checksum,
-and installs to `~/.local/bin` without sudo or shell profile changes. If needed,
-add that directory to your shell's `PATH`. Requires `curl` and standard Linux
-packaging tools; Go is not required. Rerun the command to upgrade.
+Requires `curl`. Installs to `~/.local/bin`; make sure that directory is on your
+`PATH`. Rerun the same command to upgrade.
 
-To choose a version (including a prerelease) or installation directory:
+You can [review the installer](https://github.com/nullco/lazyrun/blob/main/scripts/install.sh)
+before running it, or download a binary from [GitHub Releases](https://github.com/nullco/lazyrun/releases).
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/nullco/lazyrun/main/scripts/install.sh \
-  | LAZYRUN_VERSION=v0.1.0-rc.1 LAZYRUN_INSTALL_DIR="$HOME/bin" sh
-```
+<details>
+<summary>Build from source</summary>
 
-Piping a URL into `sh` executes downloaded code. [Review the installer](https://github.com/nullco/lazyrun/blob/main/scripts/install.sh)
-first, or download and inspect it before running `sh install.sh`. Checksums detect
-corruption, not malicious releases. Installation requires a published release;
-`latest` excludes prereleases and drafts.
-
-Alternatively, download your architecture's archive and the matching `SHA256SUMS` file from
-[GitHub Releases](https://github.com/nullco/lazyrun/releases). For example, for
-`v0.1.0` on amd64 (`x86_64`), from the download directory:
-
-```sh
-# Verify the downloaded archive against its checksum entry.
-grep '  lazyrun_v0.1.0_linux_amd64.tar.gz$' lazyrun_v0.1.0_SHA256SUMS | sha256sum -c -
-tar -xzf lazyrun_v0.1.0_linux_amd64.tar.gz
-mkdir -p "$HOME/.local/bin"
-install -m 0755 lazyrun "$HOME/.local/bin/lazyrun"
-export PATH="$HOME/.local/bin:$PATH"
-lazyrun --version
-```
-
-Use your selected release version, and `arm64` for `aarch64` machines. Extract
-into an empty directory. Release binaries do not require Go.
-
-Alternatively, build from source:
+Requires Go 1.25.10 or newer.
 
 ```sh
 git clone https://github.com/nullco/lazyrun.git
@@ -67,23 +34,31 @@ make build
 export PATH="$PWD/bin:$PATH"
 ```
 
-### 2. Configure your project
+</details>
 
-Create `lazyrun.yml` in your project, replacing these commands with your own:
+## Quick start
+
+Create `lazyrun.yml` in your project with your own commands:
 
 ```yaml
 version: 1
 services:
   api:
     command: python3 -u -m http.server 8000
+    # restart_timeout: 60s
 tasks:
   tests:
     command: go test ./...
 ```
 
-Commands run from the configuration directory and inherit your shell's environment.
+Restart waits up to 30 seconds for a command to stop. Uncomment `restart_timeout`
+if it needs longer; use a positive duration such as `60s` or `2m`. If shutdown
+times out, the restart is canceled. Stop never force-kills a command.
 
-### 3. Launch
+Commands run from the project directory and inherit the shell environment you
+launched lazyrun from.
+
+Then open the dashboard:
 
 ```sh
 cd /path/to/project
@@ -91,26 +66,50 @@ lazyrun --check
 lazyrun
 ```
 
-Select a command, then press `S` to start/run, `s` to stop, or `r` to restart.
-Press `R` in any pane to reload `lazyrun.yml` without restarting commands.
-Changes apply to the next start/restart; invalid config leaves the last valid
-configuration in place. Removed running commands remain visible and stoppable.
-Use `Tab` to switch panes and `Enter` to focus Logs. `/` searches in focused
-Logs; `G` resumes following. Press `?` for pane-specific keybindings and `q` to
-quit without stopping commands. On small screens, inactive panes collapse to clickable
-headers; narrow screens keep Logs/Details below the list accordion
-(minimum 40 columns × 10 rows).
+The dashboard needs a terminal at least 40 columns wide and 10 rows tall.
 
-Stop sends process-group `SIGTERM` only—never an automatic force-kill.
-Commands are not guaranteed to survive logout, reboot, or supervisor failure.
+## Controls
 
-For scripting, use `lazyrun --state`, `--start ALIAS`, `--stop ALIAS`,
-`--restart ALIAS`, or `--logs ALIAS`. See `lazyrun --help` for options.
+Use the arrow keys or mouse to select a command.
 
-## Releasing
+| Key | Action |
+| --- | --- |
+| `S` | Start a service or run a task |
+| `s` | Stop |
+| `r` | Restart or rerun |
+| `R` | Reload `lazyrun.yml` without restarting commands |
+| `Tab` | Switch panes |
+| `Enter` | Open Logs / Details |
+| `/` | Search in Logs |
+| `G` | Follow the latest logs |
+| `?` | Show all keybindings |
+| `q` | Quit without stopping commands |
 
-Maintainers: see [the release procedure](RELEASE.md) for tagging, gated draft
-releases, verification, and publishing.
+Configuration changes take effect on the next start or restart. Commands may stop
+when you log out or reboot.
+
+## Multiple projects
+
+Open `lazyrun` in each project directory to add it to the Projects list. Select a
+project with the arrow keys or mouse to view its commands. You can then launch
+`lazyrun` from outside a project directory and choose a project from the list.
+
+If a project is missing, open `lazyrun` from its directory again. Switching
+projects doesn't load `.env` files or activate virtual environments.
+
+## Scripting
+
+Run these from your project directory:
+
+```sh
+lazyrun --state
+lazyrun --start api
+lazyrun --stop api
+lazyrun --restart api
+lazyrun --logs api
+```
+
+See `lazyrun --help` for more options.
 
 ## License
 

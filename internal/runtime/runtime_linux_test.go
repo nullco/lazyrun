@@ -3,7 +3,6 @@
 package runtime
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +14,9 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/nullco/lazyrun/internal/logstore"
 	"github.com/nullco/lazyrun/internal/model"
+	"github.com/nullco/lazyrun/internal/securefs"
 	"github.com/nullco/lazyrun/internal/testutil"
 )
 
@@ -30,6 +31,20 @@ func fixture(t *testing.T, mode string) string {
 	return cmd
 }
 
+func testLogStore(t *testing.T) *logstore.Store {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := securefs.Open(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dir.Close() })
+	return logstore.New(dir)
+}
+
 func manager(t *testing.T, commands map[string]string, opts Options) *Manager {
 	t.Helper()
 	root := t.TempDir()
@@ -37,6 +52,7 @@ func manager(t *testing.T, commands map[string]string, opts Options) *Manager {
 	for alias, cmd := range commands {
 		p.Tasks = append(p.Tasks, model.Definition{Alias: alias, Kind: model.Task, Command: cmd, Cwd: root})
 	}
+	opts.LogStore = testLogStore(t)
 	m, err := New(p, opts)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +71,11 @@ func manager(t *testing.T, commands map[string]string, opts Options) *Manager {
 				case <-done:
 				case <-time.After(5 * time.Second):
 					t.Errorf("run %s leaked", id)
+					continue
 				}
+			}
+			if s.diskOutput != nil {
+				s.diskOutput.Release()
 			}
 		}
 	})
@@ -71,24 +91,44 @@ func start(t *testing.T, m *Manager, alias string) model.Run {
 	return r
 }
 
+func snapshot(m *Manager, alias string) (model.Run, error) {
+	s, err := m.lookup(alias)
+	if err != nil {
+		return model.Run{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return snapshotLocked(s), nil
+}
+
 func wait(t *testing.T, m *Manager, alias string, r model.Run) model.Run {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	r, err := m.Wait(ctx, alias, r.ID)
+	s, err := m.lookup(alias)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return r
+	s.mu.Lock()
+	done := s.done
+	s.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not finish", r.ID)
+	}
+	finished, err := snapshot(m, alias)
+	if err != nil || finished.ID != r.ID {
+		t.Fatal("run changed while waiting", finished, err)
+	}
+	return finished
 }
 
 func output(t *testing.T, m *Manager, alias string, r model.Run) string {
 	t.Helper()
-	b, _, err := m.Output(alias, r.ID)
+	read, err := m.ReadOutput(alias, r.ID, 0, MaxLogRead)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	return string(read.Data)
 }
 
 func eventually(t *testing.T, f func() bool) {
@@ -144,6 +184,14 @@ func TestOneShotOutcomesAndCapture(t *testing.T) {
 	}
 }
 
+func TestNewRequiresLogStore(t *testing.T) {
+	root := t.TempDir()
+	p := model.Project{ID: model.ProjectID(root), Root: root, Shell: "/bin/sh", Logs: model.DefaultLogSettings()}
+	if _, err := New(p, Options{}); err == nil {
+		t.Fatal("runtime accepted a missing log store")
+	}
+}
+
 func TestOSLaunchFailure(t *testing.T) {
 	m := manager(t, map[string]string{"x": "echo hello"}, Options{})
 	m.slots["x"].shell = "/does/not/exist/lazyrun"
@@ -154,9 +202,7 @@ func TestOSLaunchFailure(t *testing.T) {
 	if text := output(t, m, "x", r); text != "" {
 		t.Fatal(text)
 	}
-	if _, err := m.Wait(context.Background(), "x", r.ID); err != nil {
-		t.Fatal(err)
-	}
+	wait(t, m, "x", r)
 }
 
 func TestConcurrentStartAndIndependentAliases(t *testing.T) {
@@ -180,7 +226,7 @@ func TestConcurrentStartAndIndependentAliases(t *testing.T) {
 	if accepted != 1 {
 		t.Fatal("accepted starts:", accepted)
 	}
-	a, _ := m.Snapshot("a")
+	a, _ := snapshot(m, "a")
 	b := start(t, m, "b")
 	ready(t, m, "a", a)
 	ready(t, m, "b", b)
@@ -227,7 +273,7 @@ func TestRestartUsesNewRunAndRequestEnvironment(t *testing.T) {
 		t.Fatal("restart reused run identity")
 	}
 	ready(t, m, "x", second)
-	if _, _, err := m.Output("x", first.ID); !errors.Is(err, ErrRunChanged) {
+	if _, err := m.ReadOutput("x", first.ID, 0, MaxLogRead); !errors.Is(err, ErrRunChanged) {
 		t.Fatal("old output served", err)
 	}
 	if text := output(t, m, "x", second); strings.Contains(text, "final") {
@@ -267,7 +313,12 @@ func TestRequestEnvironmentAndOverrides(t *testing.T) {
 }
 
 func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
-	m := manager(t, map[string]string{"x": fixture(t, "ignore")}, Options{PollInterval: 100 * time.Millisecond, RestartTimeout: 300 * time.Millisecond})
+	m := manager(t, map[string]string{"x": fixture(t, "ignore")}, Options{PollInterval: 100 * time.Millisecond})
+	p := m.State().Project
+	p.Tasks[0].RestartTimeout = 300 * time.Millisecond
+	if err := m.Sync(p); err != nil {
+		t.Fatal(err)
+	}
 	r := start(t, m, "x")
 	ready(t, m, "x", r)
 	result := make(chan error, 1)
@@ -279,10 +330,20 @@ func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
 	if _, err := m.Start("x", nil); !errors.Is(err, ErrRestartPending) {
 		t.Fatal(err)
 	}
-	if err := <-result; !errors.Is(err, ErrRestartBlocked) {
+	// A reload must not extend the timeout already captured by this restart.
+	p.Tasks[0].RestartTimeout = 10 * time.Second
+	if err := m.Sync(p); err != nil {
 		t.Fatal(err)
 	}
-	state, _ := m.Snapshot("x")
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrRestartBlocked) {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reload changed the pending restart timeout")
+	}
+	state, _ := snapshot(m, "x")
 	if state.ID != r.ID || state.Lifecycle != model.Stopping {
 		t.Fatalf("unexpected replacement/state: %+v", state)
 	}
@@ -295,7 +356,7 @@ func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
 	}
 	finished := wait(t, m, "x", r)
 	time.Sleep(2 * m.opts.PollInterval)
-	state, _ = m.Snapshot("x")
+	state, _ = snapshot(m, "x")
 	if state.ID != finished.ID || state.Lifecycle != model.Exited {
 		t.Fatal("canceled replacement launched later")
 	}
@@ -304,7 +365,12 @@ func TestBlockedRestartCancelsReplacementAndDoesNotQueue(t *testing.T) {
 func TestShellExitDoesNotPermitOverlapWhileChildLives(t *testing.T) {
 	// The runtime's subreaper must adopt the orphan and reap it only after
 	// stable process-group completion.
-	m := manager(t, map[string]string{"x": fixture(t, "orphan")}, Options{RestartTimeout: 100 * time.Millisecond})
+	m := manager(t, map[string]string{"x": fixture(t, "orphan")}, Options{})
+	p := m.State().Project
+	p.Tasks[0].RestartTimeout = 100 * time.Millisecond
+	if err := m.Sync(p); err != nil {
+		t.Fatal(err)
+	}
 	r := start(t, m, "x")
 	ready(t, m, "x", r)
 	var childPID int
@@ -352,39 +418,12 @@ func TestShellExitDoesNotPermitOverlapWhileChildLives(t *testing.T) {
 	childPID = 0 // Cleanup must not signal a reaped/reusable PID.
 }
 
-func TestCanceledWaitDoesNotStopRunAndStdinIsNull(t *testing.T) {
-	m := manager(t, map[string]string{"x": fixture(t, "service"), "stdin": fixture(t, "stdin")}, Options{})
-	r := start(t, m, "x")
-	ready(t, m, "x", r)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := m.Wait(ctx, "x", r.ID); !errors.Is(err, context.Canceled) {
-		t.Fatal(err)
-	}
-	state, _ := m.Snapshot("x")
-	if state.Lifecycle != model.Running || state.StopRequested {
-		t.Fatal("view cancellation stopped run")
-	}
-	if _, err := m.Stop("x"); err != nil {
-		t.Fatal(err)
-	}
-	wait(t, m, "x", r)
+func TestStdinIsNull(t *testing.T) {
+	m := manager(t, map[string]string{"stdin": fixture(t, "stdin")}, Options{})
 	inputRun := start(t, m, "stdin")
 	wait(t, m, "stdin", inputRun)
 	if got := output(t, m, "stdin", inputRun); got != "stdin=0 err=<nil>" {
 		t.Fatal(got)
-	}
-}
-
-func TestHighVolumeOutputBoundedAndFinalBytesRetained(t *testing.T) {
-	m := manager(t, map[string]string{"x": fixture(t, "volume")}, Options{})
-	r := wait(t, m, "x", start(t, m, "x"))
-	b, truncated, err := m.Output("x", r.ID)
-	if err != nil || !truncated || len(b) > MaxMemoryOutput || !strings.HasSuffix(string(b), "END") || r.Outcome.Kind != model.Success {
-		t.Fatalf("bytes=%d truncated=%v outcome=%+v err=%v", len(b), truncated, r.Outcome, err)
-	}
-	if cap(m.slots["x"].output.data) > MaxMemoryOutput {
-		t.Fatal("backing allocation exceeded bound")
 	}
 }
 

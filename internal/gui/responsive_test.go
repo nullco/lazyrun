@@ -167,7 +167,7 @@ func TestResponsiveLayoutRendersHeadersFocusAndMouseExpansion(t *testing.T) {
 					t.Fatal(err)
 				}
 				list, _ = g.View("tasks")
-				if d.focus != tasksPane || !list.Highlight || !strings.Contains(list.Buffer(), "> tests") {
+				if d.focus != tasksPane || !list.Highlight || !strings.Contains(list.Buffer(), "  tests") || strings.Contains(list.Buffer(), "> ") {
 					t.Fatal("wheel did not expand the hovered header", list.Buffer())
 				}
 			}
@@ -246,7 +246,7 @@ func TestResponsiveResizePreservesPausedHistorySearchAndRun(t *testing.T) {
 		if err := g.ForceLayoutAndRedraw(); err != nil {
 			t.Fatal(err)
 		}
-		width, height := d.logViewport()
+		width, height := d.logWidth, max(1, d.logHeight)
 		line := d.buffer.lines[d.top]
 		column := line.wrapped(width).point(d.wrapTop).column
 		if d.top != 0 || column > 1216 || column+width <= 1216 || d.follow || !d.history || d.searchQuery != "saved" || d.matchIndex != 0 || d.logRun != "run" || d.logAlias != "api" {
@@ -307,20 +307,22 @@ func TestResponsiveResizePreservesPausedHistorySearchAndRun(t *testing.T) {
 	}
 }
 
-func TestCollapsedProjectHeaderDisplaysConnectionWarning(t *testing.T) {
+func TestCollapsedProjectHeaderOmitsConnectionStatus(t *testing.T) {
 	g, err := gocui.NewGui(gocui.NewGuiOpts{Headless: true, Width: MinWidth, Height: MinHeight, OutputMode: gocui.OutputTrue, SupportOverlaps: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(g.Close)
 	d := navigationDashboard(t)
-	d.connected = false
-	if err := d.layout(g); err != nil {
-		t.Fatal(err)
-	}
-	header, _ := g.View("project")
-	if !strings.Contains(header.Buffer(), "1 Project - DISCONNECTED") {
-		t.Fatal("collapsed project must retain its connection warning", header.Buffer())
+	for _, state := range []struct{ connected, loading bool }{{true, false}, {true, true}, {false, false}} {
+		d.connected, d.loadingProject = state.connected, state.loading
+		if err := d.layout(g); err != nil {
+			t.Fatal(err)
+		}
+		header, _ := g.View("project")
+		if !strings.HasPrefix(header.Buffer(), "─ 1 Project ") || strings.Contains(header.Buffer(), "DISCONNECTED") || strings.Contains(header.Buffer(), "Loading") {
+			t.Fatal("collapsed project must not show connection or loading status", header.Buffer())
+		}
 	}
 }
 

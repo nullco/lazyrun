@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+func TestDefinitionRestartWait(t *testing.T) {
+	if got := (Definition{}).RestartWait(); got != 30*time.Second {
+		t.Fatal("wrong default", got)
+	}
+	if got := (Definition{RestartTimeout: 2 * time.Minute}).RestartWait(); got != 2*time.Minute {
+		t.Fatal("explicit timeout lost", got)
+	}
+}
+
 func TestRunLabels(t *testing.T) {
 	for _, tc := range []struct {
 		kind    Kind

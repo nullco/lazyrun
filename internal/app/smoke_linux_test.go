@@ -54,6 +54,7 @@ services:
     command: %q
   worker:
     command: %q
+    restart_timeout: 3s
 tasks:
   enqueue:
     command: %q
@@ -215,7 +216,7 @@ func TestSmokeFlaskRealReloaderReconnectRestartAndStop(t *testing.T) {
 
 func enqueueSmoke(t *testing.T, f *integration, python, pool string, seconds int, token string) {
 	t.Helper()
-	f.write(fmt.Sprintf("version: 1\nlogs: {maxBytes: 1048576}\nservices:\n  worker:\n    command: %q\ntasks:\n  enqueue:\n    command: %q\n", shellQuote(python)+" -m celery -A smoke_app.celery worker --pool="+pool+" --concurrency=2 --loglevel=INFO --without-gossip --without-mingle --without-heartbeat", shellQuote(python)+fmt.Sprintf(" -u smoke_app.py enqueue --seconds %d --token %s", seconds, token)))
+	f.write(fmt.Sprintf("version: 1\nlogs: {maxBytes: 1048576}\nservices:\n  worker:\n    command: %q\n    restart_timeout: 3s\ntasks:\n  enqueue:\n    command: %q\n", shellQuote(python)+" -m celery -A smoke_app.celery worker --pool="+pool+" --concurrency=2 --loglevel=INFO --without-gossip --without-mingle --without-heartbeat", shellQuote(python)+fmt.Sprintf(" -u smoke_app.py enqueue --seconds %d --token %s", seconds, token)))
 	c := f.connect(f.root)
 	c.Close()
 	task := f.start("enqueue", os.Environ())

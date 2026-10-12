@@ -7,20 +7,22 @@ import (
 	"github.com/nullco/lazyrun/internal/model"
 )
 
-const ProtocolVersion = 3
+const ProtocolVersion = 5
 
 type Operation string
 
 const (
-	Handshake  Operation = "handshake"
-	SyncConfig Operation = "sync_config"
-	ListState  Operation = "list_state"
-	Start      Operation = "start"
-	Stop       Operation = "stop"
-	Restart    Operation = "restart"
-	ReadLogs   Operation = "read_logs"
-	WindowLogs Operation = "window_logs"
-	SearchLogs Operation = "search_logs"
+	Handshake       Operation = "handshake"
+	RegisterProject Operation = "register_project"
+	ListProjects    Operation = "list_projects"
+	SyncConfig      Operation = "sync_config"
+	ListState       Operation = "list_state"
+	Start           Operation = "start"
+	Stop            Operation = "stop"
+	Restart         Operation = "restart"
+	ReadLogs        Operation = "read_logs"
+	WindowLogs      Operation = "window_logs"
+	SearchLogs      Operation = "search_logs"
 )
 
 // Payloads remain operation-specific; keep environment-bearing control messages
@@ -29,6 +31,7 @@ type Request struct {
 	Version   int             `json:"version"`
 	ID        string          `json:"id"`
 	Operation Operation       `json:"operation"`
+	ProjectID string          `json:"projectId,omitempty"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
 }
 
@@ -63,11 +66,16 @@ type Hello struct {
 	ProjectID     string                `json:"projectId"`
 	BinaryVersion string                `json:"binaryVersion"`
 	Supervisor    model.ProcessIdentity `json:"supervisor"`
+	StateRoot     string                `json:"stateRoot"`
 }
 
 // Configuration control messages carry raw validated YAML, not redacted state.
 type SyncPayload struct {
 	Config []byte `json:"config"`
+}
+
+type RegisterPayload struct {
+	Root string `json:"root"`
 }
 
 type HandshakePayload struct {

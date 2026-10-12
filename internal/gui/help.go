@@ -21,6 +21,9 @@ func (d *dashboard) helpEntries() []helpEntry {
 	add := func(key, description string) { entries = append(entries, helpEntry{key, description}) }
 	switch {
 	case d.focus == projectPane:
+		if len(d.projects) > 1 {
+			add("↑/↓, j/k", "Switch project")
+		}
 		add("<enter>", "View project details")
 	case d.focus == servicesPane || d.focus == tasksPane:
 		add("↑/↓, j/k", "Select command")
@@ -48,9 +51,9 @@ func (d *dashboard) helpEntries() []helpEntry {
 		}
 		add("<esc>", back)
 	}
-	if item, ok := d.current(); ok && d.connected {
+	if item, ok := d.current(); ok && d.connected && !d.loadingProject {
 		start, restart := "Start service", "Restart service"
-		if displayKind(item) == model.Task {
+		if item.DisplayKind() == model.Task {
 			start, restart = "Run task", "Rerun task"
 		}
 		if !item.Removed {

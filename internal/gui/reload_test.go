@@ -82,12 +82,13 @@ func TestReloadConfigFailureLeavesStateIntact(t *testing.T) {
 }
 
 func TestReloadConfigGuardsAndBoundedRequests(t *testing.T) {
-	for _, guard := range []string{"help", "small", "search", "disconnected", "lifecycle"} {
+	for _, guard := range []string{"help", "small", "search", "loading", "disconnected", "lifecycle"} {
 		t.Run(guard, func(t *testing.T) {
 			c := &fakeClient{}
 			d, _ := reloadDashboard(t, c)
 			d.help, d.small, d.searchEditing = guard == "help", guard == "small", guard == "search"
 			d.connected, d.busy = guard != "disconnected", guard == "lifecycle"
+			d.loadingProject = guard == "loading"
 			d.reloadConfig()
 			if d.reloading {
 				t.Fatal("guard allowed reload", guard)
