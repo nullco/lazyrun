@@ -41,6 +41,7 @@ type wrapTarget struct {
 }
 
 type searchJob struct {
+	client       Client
 	ctx          context.Context
 	generation   uint64
 	alias, runID string
@@ -104,7 +105,7 @@ func (d *dashboard) queueWindow(anchor uint64, before, delta int) {
 	d.windowBusy = true
 	ctx, cancel := context.WithCancel(d.ctx)
 	d.viewCancel = cancel
-	d.jobs <- logJob{ctx: ctx, generation: d.generation, alias: d.logAlias, runID: d.logRun, after: anchor, window: true, before: min(before, windowBytes/2), delta: delta}
+	d.jobs <- logJob{client: d.client, ctx: ctx, generation: d.generation, alias: d.logAlias, runID: d.logRun, after: anchor, window: true, before: min(before, windowBytes/2), delta: delta}
 }
 func (d *dashboard) scrollLogs(delta int) {
 	d.follow = false
@@ -133,8 +134,6 @@ func (d *dashboard) scrollHorizontal(delta int) {
 	}
 }
 
-// Geometry, not a retained gocui view, determines the visible page height.
-func (d *dashboard) logViewport() (int, int) { return d.logWidth, max(1, d.logHeight) }
 func (d *dashboard) goHome() {
 	if !d.logPaneFocused() {
 		return
@@ -217,12 +216,6 @@ func (d *dashboard) windowColumn(read model.LogRead, anchor uint64) int {
 		}
 		record.Data = record.Data[:min(uint64(len(record.Data)), anchor-record.Cursor)]
 		prefix.Records = append(prefix.Records, record)
-	}
-	if len(read.Records) == 0 && len(read.Data) > 0 {
-		first := read.Next - uint64(len(read.Data))
-		if anchor > first {
-			prefix.Data = read.Data[:min(uint64(len(read.Data)), anchor-first)]
-		}
 	}
 	var b logBuffer
 	b.reset(d.state.Project.Logs.Timestamps)
@@ -323,7 +316,7 @@ func (d *dashboard) requestSearch(request model.LogSearchRequest) {
 	d.searchBusy = true
 	ctx, cancel := context.WithCancel(d.ctx)
 	d.searchCancel = cancel
-	d.searchJobs <- searchJob{ctx: ctx, generation: d.searchGeneration, alias: d.logAlias, runID: d.logRun, request: request}
+	d.searchJobs <- searchJob{client: d.client, ctx: ctx, generation: d.searchGeneration, alias: d.logAlias, runID: d.logRun, request: request}
 }
 func (d *dashboard) pollSearch() {
 	for {
@@ -331,9 +324,10 @@ func (d *dashboard) pollSearch() {
 		case <-d.ctx.Done():
 			return
 		case job := <-d.searchJobs:
+			client := job.client
 			for job.ctx.Err() == nil {
 				ctx, cancel := context.WithTimeout(job.ctx, 2*time.Second)
-				r, err := d.client.SearchLogs(ctx, job.alias, job.runID, job.request)
+				r, err := client.SearchLogs(ctx, job.alias, job.runID, job.request)
 				cancel()
 				if !d.send(job.ctx, event{search: &r, err: err, searchGeneration: job.generation, searchLast: job.request.Last}) {
 					break
@@ -436,9 +430,6 @@ func (d *dashboard) nextMatch(delta int) {
 
 // Search overlays fixed styles without sacrificing the application colors that
 // are restored at the end of each match. Only already-sanitized text enters it.
-func highlightSearch(line logLine, query string) logLine {
-	return highlightSearchContext(line, query, "", "")
-}
 func highlightSearchContext(line logLine, query, before, after string) logLine {
 	if query == "" {
 		return line

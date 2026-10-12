@@ -18,7 +18,7 @@ func TestRapidOrphanChainCannotDisappearBetweenScans(t *testing.T) {
 	}
 	ready(t, m, "x", r)
 	eventually(t, func() bool { p, err := readStat(r.Identity.PID); return err == nil && p.state == 'Z' })
-	state, _ := m.Snapshot("x")
+	state, _ := snapshot(m, "x")
 	if state.Lifecycle != model.Running {
 		t.Fatalf("prematurely finished a live descendant chain: %+v", state)
 	}

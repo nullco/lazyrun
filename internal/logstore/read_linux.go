@@ -27,8 +27,9 @@ func (s *Store) Restore(alias, runID string, maxBytes int64, end uint64, problem
 	close(o.done)
 	if maxBytes <= 0 {
 		o.unavailable = true
+		o.fail(errors.New("invalid log byte budget"))
 		return o
-	} // pre-disk-log metadata
+	}
 	d, err := s.directory(alias, false)
 	if err != nil {
 		o.unavailable = true
@@ -97,12 +98,12 @@ func (o *Output) load(idx int, f *os.File) (bool, error) {
 		return false, errors.New("log segment budget mismatch")
 	}
 	seg := &o.segments[idx]
-	seg.start = binary.BigEndian.Uint64(header[48:56])
-	if seg.start > o.end {
-		o.end = seg.start
+	start := binary.BigEndian.Uint64(header[48:56])
+	if start > o.end {
+		o.end = start
 	}
 	seg.used = headerBytes
-	last := seg.start
+	last := start
 	for seg.used < info.Size() {
 		if len(seg.entries) >= maxRecords || info.Size()-seg.used < recordBytes {
 			return true, errors.New("incomplete or excessive log records")
@@ -289,12 +290,11 @@ func (o *Output) Tail(lines, limit int) (model.LogRead, error) {
 		r.Truncated = true
 		r.Next = o.end
 	}
-	TrimTail(&r, lines)
+	trimTail(&r, lines)
 	return r, nil
 }
 
-// TrimTail is shared with the in-memory runtime fixture adapter.
-func TrimTail(r *model.LogRead, lines int) {
+func trimTail(r *model.LogRead, lines int) {
 	if lines <= 0 || len(r.Data) == 0 {
 		return
 	}

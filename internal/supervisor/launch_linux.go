@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const InternalMode = "--internal-supervisor"
+const ModeFlag = "--supervisor"
 const StartupTimeout = 10 * time.Second
 
 type LaunchOptions struct{ Executable string }
@@ -29,6 +30,42 @@ type Connection struct {
 }
 
 func (c *Connection) Close() { c.paths.Close() }
+
+// ConnectExisting opens the shared dashboard without registering a directory or
+// launching a daemon. A project must already have been opened in this lifetime.
+func ConnectExisting(ctx context.Context) (_ *Connection, err error) {
+	ctx, cancel := context.WithTimeout(ctx, StartupTimeout)
+	defer cancel()
+	paths, err := OpenSharedPaths()
+	if err != nil {
+		return nil, err
+	}
+	success := false
+	defer func() {
+		if !success {
+			paths.Close()
+		}
+	}()
+	client := &transport.Client{Endpoint: paths.Runtime.ProcPath(socketName)}
+	hello, err := probe(ctx, paths, client)
+	if err != nil {
+		return nil, fmt.Errorf("no reachable supervisor; open lazyrun inside a project first: %w", err)
+	}
+	if hello.StateRoot != paths.State.Path {
+		return nil, errors.New("supervisor uses a different state directory; keep XDG locations stable")
+	}
+	projects, err := client.Projects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(projects) == 0 {
+		return nil, errors.New("no registered projects; open lazyrun inside a project first")
+	}
+	client = client.ForProject(projects[0].ID)
+	hello.ProjectID = projects[0].ID
+	success = true
+	return &Connection{Client: client, Hello: hello, paths: paths}, nil
+}
 
 func staleConnection(err error) bool {
 	return errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ECONNREFUSED)
@@ -58,6 +95,12 @@ func Ensure(ctx context.Context, p model.Project, opts LaunchOptions) (_ *Connec
 	}()
 	client := &transport.Client{Endpoint: paths.Runtime.ProcPath(socketName), ProjectID: p.ID}
 	finish := func(hello transport.Hello) (*Connection, error) {
+		if hello.StateRoot != filepath.Join(filepath.Dir(paths.State.Path), "shared") {
+			return nil, errors.New("supervisor uses a different state directory; keep XDG locations stable")
+		}
+		if err := client.Register(ctx, p.Root); err != nil {
+			return nil, err
+		}
 		success = true
 		return &Connection{Client: client, Hello: hello, paths: paths}, nil
 	}
@@ -68,7 +111,7 @@ func Ensure(ctx context.Context, p model.Project, opts LaunchOptions) (_ *Connec
 	}
 	var launch *os.File
 	for {
-		launch, err = lock(paths.Runtime, "launch.lock", true)
+		launch, err = lock(paths.Runtime, "launch.lock")
 		if err == nil {
 			break
 		}
@@ -87,7 +130,7 @@ func Ensure(ctx context.Context, p model.Project, opts LaunchOptions) (_ *Connec
 	}
 	var owner *os.File
 	for {
-		owner, err = lock(paths.Runtime, ownerName, true)
+		owner, err = lock(paths.Runtime, ownerName)
 		if err == nil {
 			break
 		}
@@ -137,7 +180,7 @@ func Ensure(ctx context.Context, p model.Project, opts LaunchOptions) (_ *Connec
 		return nil, err
 	}
 	defer null.Close()
-	cmd := exec.Command(executable, InternalMode, p.Root)
+	cmd := exec.Command(executable, ModeFlag)
 	cmd.Dir = "/"
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = null, null, null
 	cmd.ExtraFiles = []*os.File{owner, writer}

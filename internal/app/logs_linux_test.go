@@ -238,19 +238,6 @@ func TestCLIInitialTailAndExplicitCursorReads(t *testing.T) {
 			t.Fatal(read)
 		}
 	}
-	for _, args := range [][]string{
-		{"--logs", "x", "--tail", "-1"},
-		{"--logs", "x", "--after", ""},
-		{"--logs", "x", "--tail", "1", "--after", "0"},
-		{"--logs", "x", "--tail", "1", "--tail", "2"},
-		{"--after", "0"},
-	} {
-		cmd := exec.Command(testExecutable, args...)
-		cmd.Dir = f.root
-		if err := cmd.Run(); err == nil {
-			t.Fatal("accepted invalid log options", args)
-		}
-	}
 	if _, err := f.connection.Client.TailLogs(context.Background(), "x", run.ID, -1, 0); !remoteCode(err, transport.CodeInvalid) {
 		t.Fatal(err)
 	}

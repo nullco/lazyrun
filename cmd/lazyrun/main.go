@@ -23,11 +23,11 @@ import (
 
 func main() {
 	version := binaryVersion()
-	if len(os.Args) == 3 && os.Args[1] == supervisor.InternalMode {
+	if len(os.Args) == 2 && os.Args[1] == supervisor.ModeFlag {
 		signal.Ignore(syscall.SIGHUP)
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer cancel()
-		if err := supervisor.RunInternal(ctx, os.Args[2], version); err != nil {
+		if err := supervisor.Run(ctx, version); err != nil {
 			os.Exit(1)
 		}
 		return
@@ -128,13 +128,18 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	connection, err := app.Connect(ctx, dir, supervisor.LaunchOptions{})
+	connect := app.Connect
+	if actions == 0 {
+		connect = app.ConnectDashboard
+	}
+	connection, err := connect(ctx, dir, supervisor.LaunchOptions{})
 	if err != nil {
 		return err
 	}
 	defer connection.Close()
 	if actions == 0 {
-		return gui.Run(ctx, connection.Client, gui.Options{Environment: os.Environ(), Version: version})
+		return gui.Run(ctx, connection.Client, gui.Options{Environment: os.Environ(), Version: version,
+			ProjectClient: func(id string) gui.Client { return connection.Client.ForProject(id) }})
 	}
 	var result any
 	switch {

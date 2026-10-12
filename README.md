@@ -10,6 +10,7 @@ and [lazygit](https://github.com/jesseduffield/lazygit).
 - Commands keep running when you close the dashboard; reconnect anytime.
 - Wrapped, colored logs with live follow, history paging, and retained-log search.
 - Keyboard and mouse navigation, adaptive pane layouts, and a headless CLI.
+- Switch between registered projects in one dashboard.
 - Per-project configuration in `lazyrun.yml`. Nothing starts automatically.
 
 ## Quick start
@@ -103,6 +104,26 @@ headers; narrow screens keep Logs/Details below the list accordion
 
 Stop sends process-group `SIGTERM` only—never an automatic force-kill.
 Commands are not guaranteed to survive logout, reboot, or supervisor failure.
+
+## Multiple projects
+
+One detached supervisor per user manages all projects. Open `lazyrun` in each
+project directory to register it. Every dashboard shows the same Projects list;
+select a project with arrow keys, `j`/`k`, or a mouse click to view its commands.
+Leaving the Projects pane shows only the selected project; focusing it again
+restores the full list without changing the selection.
+Once projects are registered, you can open `lazyrun` outside a project directory
+and select one from the list. Headless commands still target the current project.
+
+Registration lasts only for the supervisor's lifetime. Closing dashboards keeps
+the list and commands alive, but restarting the supervisor clears the list.
+Reopen each project to register it again. Run metadata and retained logs remain
+on disk for recovery; registration never automatically starts or adopts commands.
+Keep `XDG_RUNTIME_DIR` and `XDG_STATE_HOME` stable across clients.
+
+Start/restart uses the environment of the shell that opened the dashboard, even
+when selecting another project. Switching does not load `.env` files or activate
+virtual environments. Configured `env` overrides still apply.
 
 For scripting, use `lazyrun --state`, `--start ALIAS`, `--stop ALIAS`,
 `--restart ALIAS`, or `--logs ALIAS`. See `lazyrun --help` for options.

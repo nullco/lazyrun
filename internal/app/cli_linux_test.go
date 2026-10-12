@@ -25,11 +25,14 @@ func TestInvalidCLIFlagsNeverLaunchOrExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
+		{"--supervisor"}, {"--supervisor", "shared"}, {"--unknown-option"},
 		{"--start", ""}, {"--stop", " "}, {"--restart", ""}, {"--logs", ""}, {"--logs", "x", "--run-id", ""},
 		{"--start", "x", "--start", "x"}, {"--stop", "x", "--stop", "x"}, {"--restart", "x", "--restart", "x"},
 		{"--logs", "x", "--logs", "x"}, {"--logs", "x", "--run-id", "one", "--run-id", "two"},
 		{"--state", "--start", "x"}, {"--check", "--start", "x"}, {"--start", "x", "--stop", "x"},
 		{"--logs", "x", "--tail", "-1"}, {"--logs", "x", "--after", ""}, {"--logs", "x", "--tail", "1", "--after", "0"},
+		{"--logs", "x", "--tail", "1", "--tail", "2"}, {"--logs", "x", "--after", "0", "--after", "1"},
+		{"--after", "0"}, {"--tail", "1"}, {"--run-id", "one"},
 	} {
 		cmd := exec.Command(testExecutable, args...)
 		cmd.Dir = base

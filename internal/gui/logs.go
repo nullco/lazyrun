@@ -90,7 +90,6 @@ func (b *logBuffer) newLine(at time.Time, cursor uint64) {
 	b.lines = append(b.lines, logLine{text: text, prefix: prefix, cursor: cursor})
 	b.bytes += len(prefix) + len(text) + 1
 }
-func (b *logBuffer) marker(text string) int { return b.markerAt(text, b.rawNext) }
 func (b *logBuffer) markerAt(text string, cursor uint64) int {
 	b.rawNext = cursor
 	b.filter.Reset()
@@ -168,13 +167,6 @@ func (b *logBuffer) consume(r model.LogRead, after uint64, initial bool) int {
 		}
 		dropped += b.appendAt(record.Data, record.Time, record.Cursor)
 		expected = record.Cursor + uint64(len(record.Data))
-	}
-	if len(r.Records) == 0 && len(r.Data) > 0 {
-		if r.Truncated {
-			dropped += b.markerAt("output truncated or dropped", r.Next-uint64(len(r.Data)))
-		}
-		dropped += b.appendAt(r.Data, time.Time{}, r.Next-uint64(len(r.Data)))
-		expected += uint64(len(r.Data))
 	}
 	if r.Next > expected {
 		dropped += b.markerAt("output truncated or dropped", r.Next)

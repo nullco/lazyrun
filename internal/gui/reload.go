@@ -14,6 +14,10 @@ func (d *dashboard) reloadConfig() {
 	if d.help || d.small || d.searchEditing {
 		return
 	}
+	if d.loadingProject {
+		d.notify("Loading project; reload disabled until state arrives")
+		return
+	}
 	if !d.connected {
 		d.notify("Disconnected: reload disabled; reopen the dashboard if the supervisor was lost")
 		return
@@ -25,6 +29,7 @@ func (d *dashboard) reloadConfig() {
 	path, projectID := d.state.Project.ConfigPath, d.state.Project.ID
 	d.reloading = true
 	d.notify("Config reload pending")
+	client := d.client
 	d.spawn(func() {
 		ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
 		defer cancel()
@@ -33,7 +38,7 @@ func (d *dashboard) reloadConfig() {
 			err = errors.New("configuration project identity changed")
 		}
 		if err == nil {
-			err = d.client.Sync(ctx, data)
+			err = client.Sync(ctx, data)
 		}
 		d.send(d.ctx, event{reload: true, err: err})
 	})

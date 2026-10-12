@@ -12,7 +12,6 @@ import (
 
 	"github.com/nullco/lazyrun/internal/config"
 	"github.com/nullco/lazyrun/internal/logsearch"
-	"github.com/nullco/lazyrun/internal/logstore"
 	"github.com/nullco/lazyrun/internal/model"
 	"github.com/nullco/lazyrun/internal/runtime"
 	"github.com/nullco/lazyrun/internal/transport"
@@ -23,9 +22,9 @@ type startup struct {
 	Error string `json:"error,omitempty"`
 }
 
-// RunInternal is only called by the same executable's internal mode. FD 3 is
-// the inherited ownership lock; FD 4 is a one-shot startup handshake pipe.
-func RunInternal(ctx context.Context, root, binaryVersion string) (err error) {
+// Run starts the detached supervisor with the launcher's inherited descriptors.
+// FD 3 is the ownership lock; FD 4 is a one-shot startup handshake pipe.
+func Run(ctx context.Context, binaryVersion string) (err error) {
 	owner := os.NewFile(3, "supervisor ownership")
 	ready := os.NewFile(4, "supervisor readiness")
 	// ExtraFiles intentionally survive the bootstrap exec. Restore CLOEXEC
@@ -47,7 +46,7 @@ func RunInternal(ctx context.Context, root, binaryVersion string) (err error) {
 	}
 	info, err := ready.Stat()
 	if err != nil || info.Mode()&os.ModeNamedPipe == 0 {
-		return errors.New("internal supervisor requires an inherited startup pipe")
+		return errors.New("supervisor requires an inherited startup pipe")
 	}
 	defer func() {
 		if !notified {
@@ -56,16 +55,9 @@ func RunInternal(ctx context.Context, root, binaryVersion string) (err error) {
 	}()
 	session, err := unix.Getsid(0)
 	if err != nil || session != os.Getpid() {
-		return errors.New("internal supervisor must be detached into its own session")
+		return errors.New("supervisor must be detached into its own session")
 	}
-	p, err := config.Load(root)
-	if err != nil {
-		return err
-	}
-	if p.Root != root {
-		return errors.New("internal supervisor project root mismatch")
-	}
-	paths, err := OpenPaths(p.ID)
+	paths, err := OpenSharedPaths()
 	if err != nil {
 		return err
 	}
@@ -86,33 +78,15 @@ func RunInternal(ctx context.Context, root, binaryVersion string) (err error) {
 	if err := unix.Flock(int(owner.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return fmt.Errorf("supervisor ownership lock unavailable: %w", err)
 	}
-	// Also serialize state ownership: an invocation with a different runtime
-	// directory must not create a second writer/engine for the same state.
-	stateOwner, err := lock(paths.State, "state.lock", true)
+	// Also serialize the shared state directory: a different runtime directory
+	// must not create a second daemon managing the same project state.
+	stateOwner, err := lock(paths.State, "state.lock")
 	if err != nil {
 		return fmt.Errorf("project state is already owned or unsafe; keep XDG locations stable: %w", err)
 	}
 	defer stateOwner.Close()
 	logger, err := setupDiagnostics(paths.State)
 	if err != nil {
-		return err
-	}
-	storage := &store{dir: paths.State, projectID: p.ID}
-	saved, err := storage.Load()
-	if err != nil {
-		return err
-	}
-	manager, err := runtime.New(p, runtime.Options{LogStore: logstore.New(paths.State), Persist: func(r model.Run) error {
-		err := storage.Save(r)
-		if err != nil {
-			logger.WithError(err).Error("run metadata could not be retained")
-		}
-		return err
-	}})
-	if err != nil {
-		return err
-	}
-	if err := manager.Restore(saved); err != nil {
 		return err
 	}
 	// Parent removed a proven stale socket before transferring the lock. Do not
@@ -147,16 +121,17 @@ func RunInternal(ctx context.Context, root, binaryVersion string) (err error) {
 	if err != nil {
 		return err
 	}
-	backend := &backend{manager: manager, root: root, hello: transport.Hello{ProjectID: p.ID, BinaryVersion: binaryVersion, Supervisor: id}}
+	server := &projectServer{projects: make(map[string]*projectSession), logger: logger,
+		hello: transport.Hello{BinaryVersion: binaryVersion, Supervisor: id, StateRoot: paths.State.Path}}
+	defer server.close()
 	logger.Info("supervisor ready")
 	notify(nil)
-	return transport.Serve(ctx, listener, backend.handle)
+	return transport.Serve(ctx, listener, server.handle)
 }
 
 type backend struct {
 	manager *runtime.Manager
 	root    string
-	hello   transport.Hello
 }
 
 func invalid(req transport.Request, err error) transport.Response {
@@ -164,19 +139,7 @@ func invalid(req transport.Request, err error) transport.Response {
 }
 
 func (b *backend) handle(req transport.Request) transport.Response {
-	if req.ID == "" {
-		return invalid(req, errors.New("request ID is required"))
-	}
 	switch req.Operation {
-	case transport.Handshake:
-		var payload transport.HandshakePayload
-		if err := transport.Decode(req.Payload, &payload); err != nil {
-			return invalid(req, err)
-		}
-		if payload.ProjectID != b.hello.ProjectID {
-			return invalid(req, errors.New("project identity mismatch"))
-		}
-		return transport.Reply(req, b.hello, nil)
 	case transport.SyncConfig:
 		var payload transport.SyncPayload
 		if err := transport.Decode(req.Payload, &payload); err != nil {
@@ -185,6 +148,9 @@ func (b *backend) handle(req transport.Request) transport.Response {
 		p, err := config.Parse(payload.Config, b.root)
 		if err != nil {
 			return invalid(req, err)
+		}
+		if p.ID != req.ProjectID {
+			return invalid(req, errors.New("project identity mismatch"))
 		}
 		if err := b.manager.Sync(p); err != nil {
 			return invalid(req, err)

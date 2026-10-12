@@ -16,7 +16,7 @@ import (
 )
 
 // FixtureCommand runs the current Go test binary, relying on the caller's
-// TestProcessFixture to call RunFixture. Arguments are POSIX shell-quoted.
+// test entry point to call RunFixture. Arguments are POSIX shell-quoted.
 func FixtureCommand(mode string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -119,9 +119,6 @@ func RunFixture() {
 			fmt.Fprint(os.Stdout, text.String())
 			time.Sleep(10 * time.Millisecond)
 		}
-	case "volume":
-		_, _ = os.Stdout.Write([]byte(strings.Repeat("x", 4*1024*1024)))
-		fmt.Fprint(os.Stdout, "END")
 	default:
 		fmt.Fprintln(os.Stderr, "unknown fixture", mode)
 		os.Exit(97)

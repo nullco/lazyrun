@@ -27,7 +27,7 @@ func (c *Client) exchange(conn *net.UnixConn, op Operation, payload, out any) er
 		return err
 	}
 	id := hex.EncodeToString(random[:])
-	if err := writeFrame(conn, Request{Version: ProtocolVersion, ID: id, Operation: op, Payload: b}); err != nil {
+	if err := writeFrame(conn, Request{Version: ProtocolVersion, ID: id, Operation: op, ProjectID: c.ProjectID, Payload: b}); err != nil {
 		return err
 	}
 	var resp Response
@@ -98,6 +98,19 @@ func (c *Client) Hello(ctx context.Context) (Hello, error) {
 	var hello Hello
 	err := c.call(ctx, Handshake, nil, &hello)
 	return hello, err
+}
+
+// ForProject returns an immutable scope. In-flight requests retain their original project.
+func (c *Client) ForProject(id string) *Client {
+	return &Client{Endpoint: c.Endpoint, ProjectID: id}
+}
+func (c *Client) Register(ctx context.Context, root string) error {
+	return c.call(ctx, RegisterProject, RegisterPayload{Root: root}, nil)
+}
+func (c *Client) Projects(ctx context.Context) ([]model.ProjectSummary, error) {
+	var projects []model.ProjectSummary
+	err := c.call(ctx, ListProjects, struct{}{}, &projects)
+	return projects, err
 }
 func (c *Client) Sync(ctx context.Context, config []byte) error {
 	return c.call(ctx, SyncConfig, SyncPayload{Config: config}, nil)

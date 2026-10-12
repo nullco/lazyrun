@@ -73,7 +73,7 @@ func TestRefuseSocketSymlinksAndLockHardlinks(t *testing.T) {
 
 func TestUnreachableOwnerNeverPermitsSecondLaunch(t *testing.T) {
 	p, paths := testPaths(t)
-	owner, err := lock(paths.Runtime, ownerName, true)
+	owner, err := lock(paths.Runtime, ownerName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestIncompatibleListenerIsNotRemovedOrReplaced(t *testing.T) {
 func TestStoreBoundsAtomicMetadataAndRejectsCorruption(t *testing.T) {
 	p, paths := testPaths(t)
 	s := store{dir: paths.State, projectID: p.ID}
-	r := model.Run{ID: "run", ProjectID: p.ID, Lifecycle: model.Running, Definition: model.Definition{Alias: "../odd/alias", Kind: model.Service, Env: map[string]string{"SECRET": "do-not-persist"}}}
+	r := model.Run{ID: "run", ProjectID: p.ID, Lifecycle: model.Running, LogMaxBytes: model.DefaultLogSettings().MaxBytes, Definition: model.Definition{Alias: "../odd/alias", Kind: model.Service, Env: map[string]string{"SECRET": "do-not-persist"}}}
 	if err := s.Save(r); err != nil {
 		t.Fatal(err)
 	}
@@ -154,11 +154,37 @@ func TestStoreBoundsAtomicMetadataAndRejectsCorruption(t *testing.T) {
 	if err != nil || len(runs) != 1 || runs[0].Definition.Alias != r.Definition.Alias {
 		t.Fatal(runs, err)
 	}
-	if err := paths.State.AtomicWrite(name, []byte(`{"version":999}`)); err != nil {
+	for _, data := range [][]byte{
+		[]byte(`{"version":999}`),
+		[]byte(`{"version":1,"run":{}}`),
+		[]byte(`{"version":`),
+	} {
+		if err := paths.State.AtomicWrite(name, data); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Load(); err == nil {
+			t.Fatal("accepted invalid metadata", string(data))
+		}
+	}
+	if err := s.Save(r); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Load(); err == nil {
-		t.Fatal("accepted incompatible metadata")
+	for _, budget := range []int64{0, -1} {
+		invalid := r.Clone()
+		invalid.LogMaxBytes = budget
+		if err := s.Save(invalid); err == nil {
+			t.Fatal("accepted invalid log budget", budget)
+		}
+		data, err := json.Marshal(record{Version: metadataVersion, Run: invalid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := paths.State.AtomicWrite(name, data); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Load(); err == nil {
+			t.Fatal("loaded invalid log budget", budget)
+		}
 	}
 }
 

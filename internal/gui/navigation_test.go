@@ -141,7 +141,7 @@ func TestLeavingLogsRejectsPendingSearchMatchWindow(t *testing.T) {
 	if d.windowBusy || d.wrapTarget != nil || d.searchQuery != "needle" {
 		t.Fatal("search match page remained active outside Logs")
 	}
-	d.events <- event{generation: job.generation, window: true, read: &model.LogRead{RunID: "run", Data: []byte("OLD"), Next: 3}}
+	d.events <- event{generation: job.generation, window: true, read: &model.LogRead{RunID: "run", Records: []model.LogRecord{{Data: []byte("OLD")}}, Next: 3}}
 	d.events <- event{searchGeneration: d.searchGeneration, search: &model.LogSearchResult{RunID: "run", Matches: []model.LogMatch{{Cursor: 100, End: 106}}}}
 	d.drain()
 	if len(d.buffer.lines) != 0 || d.matches[0].Cursor != 10 || d.windowBusy {
@@ -417,12 +417,12 @@ func FuzzSearchAgreesWithTerminalSanitizer(f *testing.F) {
 
 func TestHighlightPreservesColorsAndNeverAddsUntrustedControls(t *testing.T) {
 	line := logLine{text: "\x1b[31mone needle two\x1b[0m"}
-	got := highlightSearch(line, "needle").text
+	got := highlightSearchContext(line, "needle", "", "").text
 	checkSafe(t, got)
 	if plain(got) != "one needle two" || !strings.Contains(got, "\x1b[1;30;43mneedle\x1b[0;31m") {
 		t.Fatal(got)
 	}
-	if highlightSearch(line, "").text != line.text {
+	if highlightSearchContext(line, "", "", "").text != line.text {
 		t.Fatal("empty search changed colors")
 	}
 }

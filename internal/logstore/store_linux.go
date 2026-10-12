@@ -55,7 +55,6 @@ type segment struct {
 	file    *os.File
 	entries []entry
 	used    int64
-	start   uint64
 }
 
 type Output struct {
@@ -237,7 +236,6 @@ func (o *Output) rotate(cursor uint64) error {
 	}
 	s.entries = nil
 	s.used = 0
-	s.start = cursor
 	b := make([]byte, headerBytes)
 	copy(b, magic)
 	hash := sha256.Sum256([]byte(o.runID))

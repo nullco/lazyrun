@@ -39,9 +39,19 @@ func checkPeer(conn *net.UnixConn) error {
 // on disconnection. The handler must not derive managed lifetimes from ctx.
 func Serve(ctx context.Context, listener *net.UnixListener, handle func(Request) Response) error {
 	var mu sync.Mutex
+	var workers sync.WaitGroup
 	clients := make(map[*net.UnixConn]bool)
 	stop := make(chan struct{})
-	defer close(stop)
+	defer func() {
+		close(stop)
+		listener.Close()
+		mu.Lock()
+		for c := range clients {
+			c.Close()
+		}
+		mu.Unlock()
+		workers.Wait()
+	}()
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -71,7 +81,9 @@ func Serve(ctx context.Context, listener *net.UnixListener, handle func(Request)
 		}
 		clients[c] = true
 		mu.Unlock()
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			defer func() { c.Close(); mu.Lock(); delete(clients, c); mu.Unlock() }()
 			if checkPeer(c) != nil {
 				return

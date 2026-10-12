@@ -27,6 +27,7 @@ func injectRecord(t *testing.T, root string, r model.Run, version int) {
 		t.Fatal(err)
 	}
 	defer paths.Close()
+	r.LogMaxBytes = model.DefaultLogSettings().MaxBytes
 	sum := sha256.Sum256([]byte(r.Definition.Alias))
 	b, err := json.Marshal(struct {
 		Version int       `json:"version"`
@@ -106,8 +107,18 @@ func TestIncompatibleMetadataFailsStartupBeforeCommandsCanRun(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "metadata") {
 		t.Fatal("unsafe startup accepted incompatible metadata", err)
 	}
-	// No socket is published and no command has been executed. The old fixture
-	// connection is deliberately closed; cleanup cannot adopt fabricated records.
+	// Registration fails before commands can run. The shared daemon is still
+	// reachable, so track it for cleanup even though this project was rejected.
+	paths, openErr := supervisor.OpenSharedPaths()
+	if openErr != nil {
+		t.Fatal(openErr)
+	}
+	defer paths.Close()
+	hello, probeErr := (&transport.Client{Endpoint: paths.Runtime.ProcPath("control.sock")}).Hello(context.Background())
+	if probeErr != nil {
+		t.Fatal(probeErr)
+	}
+	f.servers = append(f.servers, hello.Supervisor)
 	f.connection = nil
 }
 

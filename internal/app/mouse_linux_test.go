@@ -51,10 +51,10 @@ tasks:
 		t.Fatal("keyboard action did not use mouse-selected alias", failed)
 	}
 	out.clear()
-	terminalMouse(t, master, 0, 4, 6) // second service row: beta
+	terminalMouse(t, master, 0, 4, 5) // second service row: beta
 	eventuallyIntegration(t, func() bool { return out.contains("beta:") })
 	out.clear()
-	terminalMouse(t, master, 64, 4, 6) // wheel up targets the hovered list
+	terminalMouse(t, master, 64, 4, 5) // wheel up targets the hovered list
 	eventuallyIntegration(t, func() bool { return out.contains("alpha:") })
 	out.clear()
 	terminalMouse(t, master, 0, 40, 2)  // focus Logs; preserve alpha as owner
@@ -72,7 +72,9 @@ tasks:
 	var running model.Run
 	eventuallyIntegration(t, func() bool { running = findRun(f.state(), "alpha"); return running.Lifecycle == model.Running })
 	f.remember(running)
-	eventuallyIntegration(t, func() bool { return out.contains("running") })
+	eventuallyIntegration(t, func() bool {
+		return out.contains("start requested for alpha") && out.contains("alpha: [Logs] | Details - running")
+	})
 	if findRun(f.state(), "beta").ID != "" || findRun(f.state(), "failure").ID != failed.ID {
 		t.Fatal("modal click changed the action target")
 	}

@@ -4,12 +4,25 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"testing"
 
 	"github.com/nullco/lazyrun/internal/supervisor"
 	"golang.org/x/sys/unix"
 )
+
+func TestSupervisorStartupUsesSingleFlag(t *testing.T) {
+	f := newIntegration(t, "version: 1")
+	args, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", f.connection.Hello.Supervisor.PID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(args) != testExecutable+"\x00"+supervisor.ModeFlag+"\x00" {
+		t.Fatalf("unexpected supervisor arguments: %q", args)
+	}
+}
 
 func TestConcurrentBootstrapReplacesOnlyOneStaleSocketOwner(t *testing.T) {
 	f := newIntegration(t, "version: 1\ntasks: {x: {command: printf idle}}")

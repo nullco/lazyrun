@@ -22,7 +22,7 @@ func terminalClient(t *testing.T, root string, args ...string) (*exec.Cmd, *os.F
 	t.Helper()
 	fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		t.Fatalf("M3 terminal-closure gate requires a Linux PTY: %v", err)
+		t.Fatalf("terminal-closure test requires a Linux PTY: %v", err)
 	}
 	master := os.NewFile(uintptr(fd), "PTY master")
 	if err := unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 100}); err != nil {

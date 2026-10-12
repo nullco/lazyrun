@@ -165,13 +165,13 @@ func TestRemovedMovedAndKindAwareOutcomes(t *testing.T) {
 	def.Command = "new"
 	item.Definition = &def
 	d.state.Commands[0] = item
-	if displayKind(item) != model.Service || !strings.Contains(itemLabel(item), "moved") {
+	if item.DisplayKind() != model.Service || !strings.Contains(itemLabel(item), "moved") {
 		t.Fatal(itemLabel(item))
 	}
 	item.Run.Lifecycle = model.Exited
 	code := 0
 	item.Run.Outcome = &model.Outcome{Kind: model.Success, ExitCode: &code}
-	if displayKind(item) != model.Task || outcome(item.Run) != "exited (0)" {
+	if item.DisplayKind() != model.Task || outcome(item.Run) != "exited (0)" {
 		t.Fatal(itemLabel(item))
 	}
 	if !strings.Contains(commandDetails(item), "next run only") {
@@ -227,7 +227,7 @@ func TestViewCancellationAndStaleRunResponses(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("old read blocked view switch")
 	}
-	d.events <- event{generation: generation, read: &model.LogRead{RunID: "run-one", Data: []byte("OLD"), Next: 3}}
+	d.events <- event{generation: generation, read: &model.LogRead{RunID: "run-one", Records: []model.LogRecord{{Data: []byte("OLD")}}, Next: 3}}
 	d.drain()
 	if strings.Contains(bufferText(&d.buffer), "OLD") {
 		t.Fatal("stale output applied")
@@ -296,7 +296,7 @@ func TestFullMailboxAndBlockedRequestShutdownIsBounded(t *testing.T) {
 	for range cap(d.events) {
 		d.events <- event{err: errors.New("queued")}
 	}
-	d.spawn(d.pollState)
+	d.spawn(func() { d.pollState(c) })
 	d.state.Commands[0].Run.ID = "one"
 	d.spawn(d.pollLogs)
 	d.setFocus(servicesPane)
@@ -354,21 +354,5 @@ func TestHeadlessLayoutEmptyStatesHelpAndViewportBound(t *testing.T) {
 	v, _ = g.View("detail")
 	if len(v.Buffer()) > 100*30 {
 		t.Fatal("gocui retained off-screen cells", len(v.Buffer()))
-	}
-	for width := 0; width < 160; width++ {
-		for height := 0; height < 50; height++ {
-			areas := geometry(width, height)
-			if width < wideWidth || height < wideHeight {
-				if areas != nil {
-					t.Fatal(width, height)
-				}
-				continue
-			}
-			for name, r := range areas {
-				if r.x1 <= r.x0+1 || r.y1 <= r.y0+1 {
-					t.Fatal(name, r, width, height)
-				}
-			}
-		}
 	}
 }

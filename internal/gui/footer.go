@@ -22,9 +22,9 @@ func (d *dashboard) footerHints(width int) string {
 		}
 		secondary = []string{"Home: earliest", "↑ ↓: scroll", "[ ]: tabs", "Esc: back", "Tab: focus"}
 	case d.focus == detailPane && d.owner != projectPane && d.tab == 0:
-		if item, ok := d.current(); ok && d.connected && !item.Removed {
+		if item, ok := d.current(); ok && d.connected && !d.loadingProject && !item.Removed {
 			start := "start"
-			if displayKind(item) == model.Task {
+			if item.DisplayKind() == model.Task {
 				start = "run"
 			}
 			primary = []string{"S: " + start}
@@ -36,14 +36,17 @@ func (d *dashboard) footerHints(width int) string {
 		if d.owner == projectPane {
 			secondary = []string{"Esc: back", "Tab: focus"}
 		}
+	case d.focus == projectPane && len(d.projects) > 1:
+		primary = []string{"↑ ↓: switch project"}
+		secondary = []string{"Enter: details", "Tab: focus", "1/2/3: panes"}
 	case d.focus == servicesPane || d.focus == tasksPane:
 		primary = []string{"↑ ↓: navigate"}
-		if item, ok := d.current(); ok && d.connected {
+		if item, ok := d.current(); ok && d.connected && !d.loadingProject {
 			if item.Removed {
 				primary = append(primary, "s: stop")
 			} else {
 				start, restart := "start", "restart"
-				if displayKind(item) == model.Task {
+				if item.DisplayKind() == model.Task {
 					start, restart = "run", "rerun"
 				}
 				primary = append(primary, "S: "+start, "s: stop", "r: "+restart)
@@ -54,7 +57,7 @@ func (d *dashboard) footerHints(width int) string {
 		primary = []string{"Tab: focus", "1/2/3: panes"}
 		secondary = []string{"Enter: details", "Shift-Tab: back"}
 	}
-	if !d.help && d.connected {
+	if !d.help && d.connected && !d.loadingProject {
 		secondary = append([]string{"R: reload config"}, secondary...)
 	}
 	if width < wideWidth {

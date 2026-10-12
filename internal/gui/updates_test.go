@@ -229,7 +229,7 @@ func TestPollStateSuppressesDuplicatesButPreservesRecovery(t *testing.T) {
 	c := &pollingClient{states: make(chan chan stateReply)}
 	d := newDashboard(context.Background(), c, fixtureState(), Options{})
 	t.Cleanup(func() { d.cancel(); d.workers.Wait() })
-	d.spawn(d.pollState)
+	d.spawn(func() { d.pollState(c) })
 	changed := fixtureState()
 	changed.Commands[0].Run.Lifecycle = model.Running
 	steps := []struct {
@@ -267,9 +267,9 @@ func TestPollLogsSuppressesEmptyReadsButPreservesOutputAndErrors(t *testing.T) {
 	d.setFocus(servicesPane)
 	d.spawn(d.pollLogs)
 	empty := model.LogRead{RunID: "run"}
-	data := model.LogRead{RunID: "run", Data: []byte("new"), Next: 3, End: 3}
+	data := model.LogRead{RunID: "run", Data: []byte("new"), Records: []model.LogRecord{{Data: []byte("new")}}, Next: 3, End: 3}
 	afterData := data
-	afterData.Data = nil
+	afterData.Data, afterData.Records = nil, nil
 	warning := afterData
 	warning.Error = "retention failed"
 	steps := []struct {
@@ -315,7 +315,7 @@ func TestExitStateFinishesLogsWithoutAnotherRead(t *testing.T) {
 	d.state.Commands[0].Run.ID = "run"
 	d.state.Commands[0].Run.Lifecycle = model.Running
 	d.setFocus(servicesPane)
-	d.events <- event{generation: d.generation, initial: true, read: &model.LogRead{RunID: "run", Data: []byte{0xe2, 0x82}, Next: 2, End: 2}}
+	d.events <- event{generation: d.generation, initial: true, read: &model.LogRead{RunID: "run", Records: []model.LogRecord{{Data: []byte{0xe2, 0x82}}}, Next: 2, End: 2}}
 	d.drain()
 	if bufferText(&d.buffer) != "" {
 		t.Fatal("incomplete UTF-8 rendered before exit")

@@ -229,7 +229,7 @@ func (f *integration) cleanup() {
 	}
 	// The launcher's Cmd.Wait goroutine reaps supervisor leaders.
 	time.Sleep(30 * time.Millisecond)
-	paths, err := supervisor.OpenPaths(model.ProjectID(f.root))
+	paths, err := supervisor.OpenSharedPaths()
 	if err == nil {
 		defer paths.Close()
 		if b, err := paths.State.Read("diagnostic.log", 2*1024*1024); err == nil && strings.Contains(string(b), "DATA RACE") {
@@ -385,8 +385,8 @@ func TestConfigSynchronizationAndProjectIsolation(t *testing.T) {
 	}
 	otherClient := f.connect(other)
 	defer otherClient.Close()
-	if otherClient.Hello.Supervisor.PID == f.connection.Hello.Supervisor.PID {
-		t.Fatal("projects shared supervisor")
+	if otherClient.Hello.Supervisor != f.connection.Hello.Supervisor {
+		t.Fatal("projects did not share supervisor")
 	}
 	otherRun, err := otherClient.Client.Start(context.Background(), "pulse", nil)
 	if err != nil {

@@ -55,8 +55,11 @@ func (d *dashboard) mouseClick(g *gocui.Gui, p pane, x, y int) {
 	width, height := v.Size()
 	// Border and empty-space clicks focus the pane but never select a nearby
 	// row. Use the last rendered alias so a state update cannot shift the hit.
-	if !d.collapsed[p] && (p == servicesPane || p == tasksPane) && x >= 0 && x < width && y >= 0 && y < height && y < len(d.visibleAliases[p]) {
+	if !d.collapsed[p] && (p == projectPane || p == servicesPane || p == tasksPane) && x >= 0 && x < width && y >= 0 && y < height && y < len(d.visibleAliases[p]) {
 		alias := d.visibleAliases[p][y]
+		if p == projectPane {
+			d.selectProject(alias)
+		}
 		for _, item := range d.items(p) {
 			if item.Run.Definition.Alias == alias {
 				d.selected[p] = alias
@@ -72,10 +75,11 @@ func (d *dashboard) mouseWheel(p pane, delta int) {
 		return
 	}
 	collapsed := d.collapsed[p]
+	compactProject := p == projectPane && !d.projectListFocused()
 	d.setFocus(p)
-	// A header has no scrollable content yet. Expand it first, without moving
-	// an invisible selection or using the previous log pane's dimensions.
-	if !collapsed {
+	// Expand headers and the compact project display before moving a selection.
+	// Neither shows the list rows the wheel would otherwise navigate.
+	if !collapsed && !compactProject {
 		d.move(delta)
 	}
 }

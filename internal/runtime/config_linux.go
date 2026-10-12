@@ -79,6 +79,13 @@ func (m *Manager) Sync(project model.Project) error {
 	return nil
 }
 
+// ProjectSummary avoids copying command state when listing registered projects.
+func (m *Manager) ProjectSummary() model.ProjectSummary {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return model.ProjectSummary{ID: m.project.ID, Name: m.project.Name, Root: m.project.Root}
+}
+
 func (m *Manager) State() model.State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -121,7 +128,7 @@ func (m *Manager) Restore(runs []model.Run) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, saved := range runs {
-		if saved.ProjectID != m.projectID || saved.ID == "" {
+		if saved.ProjectID != m.projectID || saved.ID == "" || saved.LogMaxBytes <= 0 {
 			return errors.New("invalid restored run")
 		}
 		r, err := ReconcileRecorded(saved)
@@ -135,17 +142,11 @@ func (m *Manager) Restore(runs []model.Run) error {
 		}
 		s.run = r.Clone()
 		s.cmd = nil
-		s.output = &memoryOutput{limit: MaxMemoryOutput}
-		s.outputUnavailable = true
-		if m.opts.LogStore != nil {
-			problem := r.LogError
-			if problem == "" && r.LogMaxBytes > 0 && r.Outcome == nil {
-				problem = "log tail may be incomplete after supervisor loss"
-			}
-			s.diskOutput = m.opts.LogStore.Restore(r.Definition.Alias, r.ID, r.LogMaxBytes, r.LogEnd, problem)
-			s.output = nil
-			s.outputUnavailable = false
+		problem := r.LogError
+		if problem == "" && r.Outcome == nil {
+			problem = "log tail may be incomplete after supervisor loss"
 		}
+		s.diskOutput = m.opts.LogStore.Restore(r.Definition.Alias, r.ID, r.LogMaxBytes, r.LogEnd, problem)
 		s.done = make(chan struct{})
 		// There is no future collector/reaper for a historical run, even if unknown.
 		close(s.done)

@@ -1,5 +1,5 @@
-// Package model contains configuration and run state shared by the runtime and
-// future supervisor/transport/UI. It has no process or terminal dependencies.
+// Package model contains configuration and run state shared by the runtime,
+// supervisor, transport, and UI. It has no process or terminal dependencies.
 package model
 
 import (
@@ -53,6 +53,13 @@ type Project struct {
 	Logs       LogSettings  `json:"logs"`
 	Services   []Definition `json:"services"`
 	Tasks      []Definition `json:"tasks"`
+}
+
+// ProjectSummary lists a registered project without exposing its configuration.
+type ProjectSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Root string `json:"root"`
 }
 
 // ProjectID must be given an absolute, symlink-canonicalized project root.

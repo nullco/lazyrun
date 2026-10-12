@@ -18,11 +18,18 @@ const ownerName = "owner.lock"
 
 type Paths struct{ Runtime, State *securefs.Dir }
 
+// OpenPaths shares the control directory but keeps command state per project.
 func OpenPaths(projectID string) (*Paths, error) {
 	b, err := hex.DecodeString(projectID)
 	if err != nil || len(b) != 32 {
 		return nil, errors.New("invalid project identity")
 	}
+	return openPaths(projectID)
+}
+
+func OpenSharedPaths() (*Paths, error) { return openPaths("shared") }
+
+func openPaths(stateID string) (*Paths, error) {
 	base := os.Getenv("XDG_RUNTIME_DIR")
 	if base != "" {
 		d, err := securefs.Open(base, false)
@@ -39,7 +46,7 @@ func OpenPaths(projectID string) (*Paths, error) {
 		return nil, err
 	}
 	privateBase.Close()
-	runtimeDir, err := securefs.Open(filepath.Join(base, projectID), true)
+	runtimeDir, err := securefs.Open(filepath.Join(base, "shared"), true)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +66,7 @@ func OpenPaths(projectID string) (*Paths, error) {
 		return nil, err
 	}
 	privateState.Close()
-	state, err := securefs.Open(filepath.Join(stateApp, projectID), true)
+	state, err := securefs.Open(filepath.Join(stateApp, stateID), true)
 	if err != nil {
 		runtimeDir.Close()
 		return nil, err
@@ -69,16 +76,12 @@ func OpenPaths(projectID string) (*Paths, error) {
 
 func (p *Paths) Close() { p.Runtime.Close(); p.State.Close() }
 
-func lock(dir *securefs.Dir, name string, nonblock bool) (*os.File, error) {
+func lock(dir *securefs.Dir, name string) (*os.File, error) {
 	f, err := dir.File(name, unix.O_RDWR|unix.O_CREAT)
 	if err != nil {
 		return nil, err
 	}
-	flags := unix.LOCK_EX
-	if nonblock {
-		flags |= unix.LOCK_NB
-	}
-	if err := unix.Flock(int(f.Fd()), flags); err != nil {
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		f.Close()
 		return nil, err
 	}

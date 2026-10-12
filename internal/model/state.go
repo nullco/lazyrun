@@ -15,7 +15,7 @@ type CommandState struct {
 }
 
 func (s CommandState) DisplayKind() Kind {
-	if s.Run.Lifecycle.Active() || s.Definition == nil {
+	if s.Run.Lifecycle.Active() || s.Removed || s.Definition == nil {
 		return s.Run.Definition.Kind
 	}
 	return s.Definition.Kind

@@ -24,6 +24,8 @@ const (
 	MinimalExample = "version: 1\nservices:\n  api:\n    command: .venv/bin/python -u -m flask run\ntasks:\n  tests:\n    command: .venv/bin/python -m pytest\n"
 )
 
+var ErrNotFound = errors.New("no " + Filename + " found")
+
 // Discover walks the physical directory hierarchy. Symlinked invocation paths
 // and invocations from subdirectories therefore share a canonical identity.
 func Discover(dir string) (string, error) {
@@ -51,7 +53,7 @@ func Discover(dir string) (string, error) {
 		}
 		parent := filepath.Dir(root)
 		if parent == root {
-			return "", fmt.Errorf("no %s found in %s or its parents; create a trusted configuration, for example:\n\n%s", Filename, dir, MinimalExample)
+			return "", fmt.Errorf("%w in %s or its parents; create a trusted configuration, for example:\n\n%s", ErrNotFound, dir, MinimalExample)
 		}
 		root = parent
 	}
