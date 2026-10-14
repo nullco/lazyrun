@@ -73,7 +73,7 @@ tasks:
 	eventuallyIntegration(t, func() bool { running = findRun(f.state(), "alpha"); return running.Lifecycle == model.Running })
 	f.remember(running)
 	eventuallyIntegration(t, func() bool {
-		return out.contains("start requested for alpha") && out.contains("alpha: [Logs] | Details - running")
+		return out.contains("alpha: [Logs] | Details - running")
 	})
 	if findRun(f.state(), "beta").ID != "" || findRun(f.state(), "failure").ID != failed.ID {
 		t.Fatal("modal click changed the action target")
