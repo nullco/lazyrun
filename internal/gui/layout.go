@@ -274,7 +274,7 @@ func (d *dashboard) layout(g *gocui.Gui) error {
 	if err != nil {
 		return err
 	}
-	v.Footer = plain(crop(d.notice, "", 0, max(0, v.InnerWidth()-4)))
+	v.Footer = ""
 	if d.owner == projectPane {
 		d.showDetails(v, projectDetails(d.state, connection, d.opts.Version))
 	} else if d.loadingProject {
