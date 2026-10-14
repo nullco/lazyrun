@@ -27,7 +27,7 @@ func TestDashboardReloadKeyUpdatesConfigWithoutChangingRunningCommands(t *testin
 	keys(t, master, "R") // global action from the initial Project pane
 	eventuallyIntegration(t, func() bool {
 		s := f.state()
-		return s.Project.Name == "reloaded-project" && findRun(s, "added").Definition.Alias == "added" && out.contains("Config reloaded")
+		return s.Project.Name == "reloaded-project" && findRun(s, "added").Definition.Alias == "added" && out.contains("reloaded-project")
 	})
 	current := findRun(f.state(), "pulse")
 	if current.ID != run.ID || current.Identity != run.Identity || current.StopRequested || !strings.Contains(current.Definition.Command, "echo ready") {
@@ -39,11 +39,15 @@ func TestDashboardReloadKeyUpdatesConfigWithoutChangingRunningCommands(t *testin
 	keys(t, master, "3")
 	eventuallyIntegration(t, func() bool { return out.contains("added") })
 
+	// Reload errors are shown in Details; scroll to its latest message.
+	keys(t, master, "\r]\x1b[6~\x1b[6~\x1b[6~")
+	eventuallyIntegration(t, func() bool { return out.contains("Last message:") })
+
 	// Validation failures leave the last valid project available.
 	out.clear()
 	f.write("version: [")
-	keys(t, master, "R") // reload also works in Tasks
-	eventuallyIntegration(t, func() bool { return out.contains("Config reload failed") })
+	keys(t, master, "R") // reload also works in task Details
+	eventuallyIntegration(t, func() bool { return out.contains("failed:") })
 	if f.state().Project.Name != "reloaded-project" {
 		t.Fatal("invalid config replaced valid state")
 	}
@@ -57,7 +61,7 @@ func TestDashboardReloadKeyUpdatesConfigWithoutChangingRunningCommands(t *testin
 	}
 	out.clear()
 	keys(t, master, "R")
-	eventuallyIntegration(t, func() bool { return out.contains("Config reload failed") })
+	eventuallyIntegration(t, func() bool { return out.contains("inspect ") })
 	if f.state().Project.Name != "reloaded-project" {
 		t.Fatal("missing config changed project")
 	}
@@ -68,7 +72,7 @@ func TestDashboardReloadKeyUpdatesConfigWithoutChangingRunningCommands(t *testin
 	keys(t, master, "2R")
 	eventuallyIntegration(t, func() bool {
 		s := f.state()
-		return s.Project.Name == "removed-project" && len(s.Commands) == 1 && s.Commands[0].Removed && out.contains("Config reloaded")
+		return s.Project.Name == "removed-project" && len(s.Commands) == 1 && s.Commands[0].Removed && out.contains("removed from")
 	})
 	current = findRun(f.state(), "pulse")
 	if current.ID != run.ID || current.Identity != run.Identity || current.Lifecycle != model.Running || current.StopRequested {
