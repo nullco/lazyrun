@@ -10,8 +10,6 @@ on:
         description: Run full fuzzing and build release packages
         type: boolean
         default: true
-  schedule:
-    - cron: '17 4 * * 1'
   workflow_call:
     inputs:
       version:
@@ -52,8 +50,8 @@ jobs:
       - name: Fuzz tests
         id: fuzz
         env:
-          FUZZ_TIME: ${{ (inputs.full || github.event_name == 'schedule') && '30s' || '5s' }}
-          FUZZ_PARALLEL: ${{ (inputs.full || github.event_name == 'schedule') && '4' || '2' }}
+          FUZZ_TIME: ${{ inputs.full && '30s' || '5s' }}
+          FUZZ_PARALLEL: ${{ inputs.full && '4' || '2' }}
         run: make fuzz 2>&1 | tee "$RUNNER_TEMP/fuzz.log"
       - name: Preserve failure diagnostics
         if: failure()
@@ -107,7 +105,7 @@ jobs:
       - run: make audit
 
   package:
-    if: inputs.full || github.event_name == 'schedule'
+    if: inputs.full
     needs: [check, smoke, audit]
     runs-on: ubuntu-24.04
     timeout-minutes: 10

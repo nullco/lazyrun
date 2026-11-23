@@ -12,7 +12,7 @@ to a **draft GitHub Release**.
 Routine CI runs on pull requests and pushes to `main`, not on both a feature
 branch push and its PR. It runs the same tests, smoke checks, and audit, with five
 seconds per fuzz target and no packaging. Superseded branch/PR runs are canceled;
-release-tag runs are not. Weekly and default manual runs use the full gates.
+release-tag runs are not. Manual runs use the full gates by default.
 Go caches are isolated by job and updated per commit; Python downloads are cached.
 
 Publishing is a separate, manual action. A failed gate leaves the Git tag in
